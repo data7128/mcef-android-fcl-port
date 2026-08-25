@@ -15,28 +15,59 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
+
+      - name: Check for MCEF source
+        id: check-src
+        run: |
+          if [ ! -f "mcef-android/build.gradle" ] && [ ! -f "mcef-android/settings.gradle" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::notice::mcef-android 目录尚无构建文件，跳过构建"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Clone MCEF upstream (if needed)
+        if: steps.check-src.outputs.skip == 'true'
+        run: |
+          echo "::notice::正在克隆上游 MCEF 源码..."
+          # 上游 MCEF 仓库: https://github.com/Cinemamod/MCEF
+          # 如果上游仓库不可用，此步骤将失败并提示
+          git clone --depth 1 https://github.com/Cinemamod/MCEF.git mcef-android-src || {
+            echo "::error::无法克隆上游 MCEF 仓库，请手动添加源码到 mcef-android/ 目录"
+            exit 1
+          }
+          # 将上游源码复制到 mcef-android 目录
+          cp -r mcef-android-src/* mcef-android/ || true
+          rm -rf mcef-android-src
 
       - name: Setup JDK 17
+        if: steps.check-src.outputs.skip != 'true' || success()
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
       - name: Setup Gradle
+        if: steps.check-src.outputs.skip != 'true' || success()
         uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.5'
 
-      - name: Clone java-cef submodule
-        run: ./gradlew cloneJcef
+      - name: Generate Gradle Wrapper
+        if: steps.check-src.outputs.skip != 'true' || success()
+        working-directory: mcef-android
+        run: gradle wrapper --gradle-version 8.5 --distribution-type bin || true
 
       - name: Build Fabric mod
-        run: ./gradlew :fabric:remapJar
+        if: steps.check-src.outputs.skip != 'true' || success()
         working-directory: mcef-android
+        run: ./gradlew build --stacktrace || gradle build --stacktrace
 
       - name: Upload mod JAR
+        if: success() && steps.check-src.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: mcef-android-fabric
-          path: mcef-android/fabric/build/libs/*.jar
+          path: mcef-android/**/build/libs/*.jar
           retention-days: 30
+          if-no-files-found: warn

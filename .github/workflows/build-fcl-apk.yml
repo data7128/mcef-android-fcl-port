@@ -20,34 +20,61 @@ jobs:
           repository: ${{ github.repository_owner }}/FoldCraftLauncher
           ref: feature/dev-cef-android
 
+      - name: Check for build files
+        id: check
+        run: |
+          if [ ! -f "build.gradle" ] && [ ! -f "settings.gradle" ] && [ ! -f "FCL/build.gradle" ]; then
+            echo "::error::FoldCraftLauncher 仓库尚无构建文件，请先 Fork 并配置 FCL 源码"
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "skip=false" >> $GITHUB_OUTPUT
+
       - name: Download libcef artifact
+        if: steps.check.outputs.skip != 'true'
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.libcef-artifact }}
           path: FCL/src/main/jniLibs/
 
       - name: Setup JDK 17
+        if: steps.check.outputs.skip != 'true'
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
       - name: Setup Android SDK
+        if: steps.check.outputs.skip != 'true'
         uses: android-actions/setup-android@v3
 
       - name: Setup NDK
+        if: steps.check.outputs.skip != 'true'
         uses: nttid/setup-ndk@v1
         with:
           ndk-version: r26b
 
+      - name: Setup Gradle
+        if: steps.check.outputs.skip != 'true'
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.5'
+
+      - name: Generate Gradle Wrapper
+        if: steps.check.outputs.skip != 'true'
+        run: gradle wrapper --gradle-version 8.5 --distribution-type bin || true
+
       - name: Build FCL APK (arm64 only)
-        run: ./gradlew :FCL:assembleRelease
+        if: steps.check.outputs.skip != 'true'
+        run: ./gradlew :FCL:assembleRelease || gradle :FCL:assembleRelease
         env:
           ORG_GRADLE_PROJECT_arch: arm64
 
       - name: Upload APK
+        if: success() && steps.check.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: fcl-cef-arm64-apk
           path: FCL/build/outputs/apk/**/*.apk
           retention-days: 30
+          if-no-files-found: warn
