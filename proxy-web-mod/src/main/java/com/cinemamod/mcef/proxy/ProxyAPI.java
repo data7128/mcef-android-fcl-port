@@ -69,6 +69,54 @@ public class ProxyAPI {
     }
 
     /**
+     * 发送模拟点击请求，返回点击后的新截图。
+     *
+     * 请求格式：
+     *   GET /click?url=<URL>&x=<X>&y=<Y>&width=<W>&height=<H>
+     * 响应格式：
+     *   image/png (点击后页面的新截图)
+     *
+     * @param url    目标网页 URL
+     * @param x      点击X像素坐标
+     * @param y      点击Y像素坐标
+     * @param width  截图宽度
+     * @param height 截图高度
+     * @return CompletableFuture，包含 PNG 字节数据（失败时返回 null）
+     */
+    public static CompletableFuture<byte[]> sendClick(String url, int x, int y, int width, int height) {
+        String serviceUrl = ProxyConfig.get().serviceUrl;
+        int timeout = ProxyConfig.get().requestTimeout;
+
+        String encodedUrl = URLEncoder.encode(url, StandardCharsets.UTF_8);
+        String requestUrl = String.format("%s/click?url=%s&x=%d&y=%d&width=%d&height=%d",
+                serviceUrl, encodedUrl, x, y, width, height);
+
+        ProxyWebMod.LOGGER.info("发送点击请求: url={}, ({}, {})", url, x, y);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(requestUrl))
+                .timeout(Duration.ofSeconds(timeout))
+                .header("Accept", "image/png")
+                .GET()
+                .build();
+
+        return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray())
+                .thenApply(response -> {
+                    if (response.statusCode() == 200) {
+                        ProxyWebMod.LOGGER.info("点击请求成功: {} bytes", response.body().length);
+                        return response.body();
+                    } else {
+                        ProxyWebMod.LOGGER.warn("点击服务返回: HTTP {}", response.statusCode());
+                        return null;
+                    }
+                })
+                .exceptionally(e -> {
+                    ProxyWebMod.LOGGER.warn("点击请求失败: {} - {}", url, e.getMessage());
+                    return null;
+                });
+    }
+
+    /**
      * 探测截图服务是否可用。
      *
      * @return true 表示服务可用

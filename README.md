@@ -34,7 +34,7 @@
 | 原理 | Fabric mod 通过 HTTP 调用 WebView 截图服务，将网页静态画面渲染到 MC 方块纹理 |
 | CEF 依赖 | 无。不加载任何 native 库 |
 | FCL 修改 | 需要修改 FCL 启动器源码，集成 `WebViewScreenshotService`（见 `fcl-patches/`） |
-| 交互能力 | 无。只能显示静态截图，不支持点击/输入 |
+| 交互能力 | 简易坐标点击（需后端截图服务支持）。不支持滚动、表单输入、JS弹窗 |
 | 刷新率 | 默认 120 秒一次截图请求（可在 GUI 中修改） |
 | 降级模式 | 截图服务不可用时显示灰色占位纹理，mod 不崩溃 |
 | CI 构建 | 已通过。免费 runner 可编译产出 jar |
@@ -193,9 +193,9 @@ MCEF 本身不直接引用 Android `Activity`，但 CEF/JCEF 的 JNI 层在以�
 
 ```bash
 cd proxy-web-mod
-gradle wrapper --gradle-version 8.5 --distribution-type bin
+gradle wrapper --gradle-version 8.8 --distribution-type bin
 ./gradlew build
-# 产出: build/libs/proxy-web-mod-1.0.0.jar
+# 产出: build/libs/proxy-web-mod-2.0.0.jar
 ```
 
 #### CI 自动构建
@@ -295,6 +295,76 @@ gradle wrapper --gradle-version 8.12 --distribution-type bin
 - 截图服务不可用：方块上显示深灰色占位纹理
 - mod 不会导致游戏崩溃
 
+### GUI 操作说明
+
+1. 放置 Web Screen 方块（创造模式物品栏 Building Blocks 分类）
+2. 右键方块打开 GUI 设置界面
+3. 在 URL 输入框输入网址（如 `https://www.baidu.com`）
+4. 调整截图尺寸（宽/高，建议 512x512，安卓 GL4ES 超过 1024 可能崩溃）
+5. 设置刷新间隔（秒，最小 10 秒）
+6. 点击「刷新截图」按钮立即请求一次截图
+7. 点击「清除网址」按钮清空 URL 和纹理
+8. 「模拟点击」开关：开启后左键方块面可模拟点击网页
+9. 图片预览区域实时显示当前截图状态
+10. 点击「保存」按钮保存设置并关闭 GUI
+
+### 模拟点击交互
+
+#### 原理
+玩家左键点击 Web Screen 方块正面，模组将 MC 方块面上的 2D 点击坐标换算成网页图片像素坐标，发送给后端截图服务。截图服务使用 Playwright 在指定坐标模拟鼠标点击，然后返回新截图。
+
+#### 操作步骤
+1. 右键方块打开 GUI，开启「模拟点击」开关
+2. 保存设置并关闭 GUI
+3. 对准方块正面，左键点击
+4. 游戏内 actionbar 显示点击状态（发送中/成功/失败）
+5. 点击成功后方块表面自动更新为新截图
+
+#### 坐标映射
+- 方块正面 1x1 单位映射到截图尺寸（如 512x512）
+- 根据 FACING 方向（南北东西）自动换算 UV 坐标
+- 只处理正面点击，侧面和背面点击被忽略
+
+### 截图服务部署
+
+模组依赖外部 HTTP 截图服务。仓库提供 Python Playwright 实现：
+
+```bash
+# 安装依赖
+pip install aiohttp playwright
+playwright install chromium
+playwright install-deps chromium
+
+# 启动服务
+python3 tools/screenshot_service.py --port 28085 --host 0.0.0.0 --concurrency 4
+```
+
+API 端点：
+- `GET /health` — 健康检查
+- `GET /screenshot?url=...&width=512&height=512` — 网页截图
+- `GET /click?url=...&x=0&y=0&width=512&height=512` — 模拟点击后截图
+- `GET /stats` — 服务统计
+
+配置文件 `config/proxy-web-mod.json`：
+```json
+{
+  "serviceUrl": "http://10.0.2.2:28085",
+  "refreshInterval": 60,
+  "maxTextureSize": 512,
+  "requestTimeout": 15
+}
+```
+
+### 模拟点击局限性（重要）
+
+- 不支持网页滚动（无鼠标滚轮事件）
+- 不支持表单输入（无键盘事件）
+- 不支持 JS 弹窗处理
+- 必须依赖外部 HTTP 截图后端服务，断网无法工作
+- 只是图片 + 坐标模拟，不等同 WebDisplays 原生浏览器
+- 每次点击有 2-3 秒延迟（HTTP 往返 + Playwright 执行 + 截图）
+- 体验类似于每点一次等 3 秒的远程桌面
+
 ### 路线 1 测试
 
 路线 1 当前不可行，无法进行真机测试。
@@ -352,13 +422,15 @@ mcef-android-fcl-port/
 │       │   ├── WebScreenBlock.java        # 自定义方块（水平朝向）
 │       │   ├── WebScreenBlockEntity.java  # 方块实体（截图请求/纹理管理）
 │       │   ├── WebScreenBlockEntityRenderer.java # 渲染器（OpenGL ES 纹理绘制）
-│       │   └── WebScreenGUI.java          # 游戏内 GUI（URL输入/尺寸设置）
+│       │   └── WebScreenGUI.java          # 游戏内 GUI（URL输入/尺寸/图片预览/模拟点击开关）
 │       └── resources/
 │           ├── fabric.mod.json             # Fabric mod 元数据（依赖 Fabric-API）
 │           └── assets/proxy-web-mod/       # 方块模型/语言文件/战利品表
 ├── fcl-patches/                       # FCL 启动器补丁源码
 │   └── src/main/java/com/cinemamod/mcef/proxy/
 │       └── WebViewScreenshotService.java  # WebView 截图 HTTP 服务
+├── tools/                             # 工具脚本
+│   └── screenshot_service.py          # 网页截图 HTTP 服务（Playwright 异步并发版）
 ├── mcef-android/                      # 路线1: MCEF 源码（CI 自动克隆）
 │   └── .gitkeep
 ├── webdisplays-android/               # WebDisplays 适配（预留）

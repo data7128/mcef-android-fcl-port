@@ -2,10 +2,16 @@ package com.cinemamod.mcef.proxy;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.texture.NativeImage;
 import net.minecraft.client.texture.NativeImageBackedTexture;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 import org.slf4j.Logger;
 
 import java.io.ByteArrayInputStream;
@@ -14,35 +20,46 @@ import java.util.concurrent.CompletableFuture;
 /**
  * 网页显示方块实体。
  *
- * 存储 URL 和截图设置，管理异步截图请求。
+ * 存储 URL 和截图设置，管理异步截图请求和模拟点击交互。
  * 纹理上传在渲染线程执行（通过渲染器调用）。
  *
- * 线程安全说明：
+ * 功能：
+ *   - 网页截图自动刷新（基于 ProxyConfig.refreshInterval）
+ *   - 模拟点击：左键方块，换算成网页像素坐标，发送给截图服务
+ *   - NBT 持久化：网址、截图尺寸、点击开关状态
+ *   - 纹理自动缩放，防止安卓 GL4ES 崩溃
+ *   - 容错：空 URL 跳过、网络超时、异常捕获
+ *
+ * 线程安全：
  *   - HTTP 请求在异步线程执行
- *   - PNG 解码和纹理上传在渲染线程执行（通过 NativeImageBackedTexture）
+ *   - PNG 解码和纹理上传在渲染线程执行
  *   - volatile 字段用于跨线程可见性
+ *   - MinecraftClient.execute() 确保回调在客户端线程执行
  *
  * 许可证：LGPL-2.1-or-later
  */
 public class WebScreenBlockEntity extends BlockEntity {
     private static final Logger LOGGER = ProxyWebMod.LOGGER;
 
-    // 持久化数据
+    // ===== 持久化数据（NBT） =====
     private String url = "";
     private int textureWidth = 512;
     private int textureHeight = 512;
+    private boolean clickEnabled = false;
 
-    // 异步截图状态
+    // ===== 截图请求状态 =====
     private volatile boolean requestInProgress = false;
     private volatile byte[] pendingPng = null;
     private volatile String errorState = null;
     private volatile long lastRequestTime = 0;
 
-    // 客户端纹理（渲染线程管理）
+    // ===== 模拟点击状态 =====
+    private volatile boolean clickInProgress = false;
+    private volatile String clickStatus = null;
+
+    // ===== 客户端纹理（渲染线程管理） =====
     private transient NativeImageBackedTexture texture;
     private transient int glTextureId = 0;
-
-    // 截图缓存 TTL（通过 ProxyConfig.get().refreshInterval 动态读取）
 
     public WebScreenBlockEntity(BlockPos pos, BlockState state) {
         super(ProxyWebMod.WEB_SCREEN_BE_TYPE, pos, state);
@@ -55,6 +72,7 @@ public class WebScreenBlockEntity extends BlockEntity {
         nbt.putString("url", url);
         nbt.putInt("width", textureWidth);
         nbt.putInt("height", textureHeight);
+        nbt.putBoolean("clickEnabled", clickEnabled);
         super.writeNbt(nbt);
     }
 
@@ -64,12 +82,13 @@ public class WebScreenBlockEntity extends BlockEntity {
         url = nbt.getString("url");
         textureWidth = nbt.getInt("width");
         textureHeight = nbt.getInt("height");
+        clickEnabled = nbt.getBoolean("clickEnabled");
         if (textureWidth <= 0) textureWidth = 512;
         if (textureHeight <= 0) textureHeight = 512;
         lastRequestTime = 0; // 强制首次加载时请求截图
     }
 
-    // ===== 客户端更新逻辑（由渲染器每帧调用）=====
+    // ===== 客户端更新逻辑（由渲染器每帧调用） =====
 
     /**
      * 客户端更新：检查是否需要请求新截图。
@@ -110,6 +129,115 @@ public class WebScreenBlockEntity extends BlockEntity {
                 });
     }
 
+    // ===== 模拟点击交互 =====
+
+    /**
+     * 计算从世界命中位置到网页像素坐标的映射。
+     *
+     * 根据 BlockHitResult 的命中位置和方块朝向，
+     * 换算出在纹理上的像素坐标。
+     *
+     * UV 映射与渲染器中的 drawFaceQuad 一致：
+     *   SOUTH: U=localX, V=1-localY
+     *   NORTH: U=1-localX, V=1-localY
+     *   EAST:  U=1-localZ, V=1-localY
+     *   WEST:  U=localZ, V=1-localY
+     *
+     * @param hitPos    命中的世界坐标
+     * @param blockPos  方块位置
+     * @param facing    方块朝向
+     * @return int[2]{pixelX, pixelY}，或 null（不支持的朝向）
+     */
+    public int[] calculatePixelCoords(Vec3d hitPos, BlockPos blockPos, Direction facing) {
+        double localX = hitPos.x - blockPos.getX();
+        double localY = hitPos.y - blockPos.getY();
+        double localZ = hitPos.z - blockPos.getZ();
+
+        double u, v;
+
+        switch (facing) {
+            case SOUTH:
+                u = localX;
+                v = 1.0 - localY;
+                break;
+            case NORTH:
+                u = 1.0 - localX;
+                v = 1.0 - localY;
+                break;
+            case EAST:
+                u = 1.0 - localZ;
+                v = 1.0 - localY;
+                break;
+            case WEST:
+                u = localZ;
+                v = 1.0 - localY;
+                break;
+            default:
+                return null;
+        }
+
+        // 转换为像素坐标，并限制范围
+        int pixelX = Math.max(0, Math.min((int)(u * textureWidth), textureWidth - 1));
+        int pixelY = Math.max(0, Math.min((int)(v * textureHeight), textureHeight - 1));
+
+        return new int[]{pixelX, pixelY};
+    }
+
+    /**
+     * 发送模拟点击请求到截图服务。
+     * 截图服务在指定坐标模拟点击，返回新截图。
+     *
+     * @param pixelX 点击X像素坐标
+     * @param pixelY 点击Y像素坐标
+     */
+    public void sendClick(int pixelX, int pixelY) {
+        if (url == null || url.isEmpty()) return;
+        if (clickInProgress) return;
+
+        clickInProgress = true;
+        clickStatus = "发送中...";
+
+        LOGGER.info("模拟点击: url={}, ({}, {})", url, pixelX, pixelY);
+
+        ProxyAPI.sendClick(url, pixelX, pixelY, textureWidth, textureHeight)
+                .thenAccept(bytes -> {
+                    MinecraftClient.getInstance().execute(() -> {
+                        if (bytes != null && bytes.length > 0) {
+                            pendingPng = bytes;
+                            errorState = null;
+                            clickStatus = "点击成功";
+                            PlayerEntity player = MinecraftClient.getInstance().player;
+                            if (player != null) {
+                                player.sendMessage(Text.literal("§a点击成功 ✓")
+                                        .formatted(Formatting.GREEN), true);
+                            }
+                        } else {
+                            clickStatus = "点击失败: 服务返回空数据";
+                            PlayerEntity player = MinecraftClient.getInstance().player;
+                            if (player != null) {
+                                player.sendMessage(Text.literal("§c点击失败: 服务返回空数据")
+                                        .formatted(Formatting.RED), true);
+                            }
+                        }
+                        clickInProgress = false;
+                    });
+                })
+                .exceptionally(e -> {
+                    MinecraftClient.getInstance().execute(() -> {
+                        clickStatus = "错误: " + e.getMessage();
+                        clickInProgress = false;
+                        PlayerEntity player = MinecraftClient.getInstance().player;
+                        if (player != null) {
+                            player.sendMessage(Text.literal("§c点击失败: " + e.getMessage())
+                                    .formatted(Formatting.RED), true);
+                        }
+                    });
+                    return null;
+                });
+    }
+
+    // ===== 纹理管理 =====
+
     /**
      * 获取并更新纹理 GL ID。
      * 如果有新的 PNG 数据待处理，先上传到纹理。
@@ -136,6 +264,7 @@ public class WebScreenBlockEntity extends BlockEntity {
 
             if (texture == null) {
                 texture = new NativeImageBackedTexture(image);
+                texture.upload();
                 glTextureId = texture.getGlId();
                 LOGGER.info("纹理创建: glId={}, {}x{}", glTextureId, image.getWidth(), image.getHeight());
             } else {
@@ -165,7 +294,6 @@ public class WebScreenBlockEntity extends BlockEntity {
         NativeImage dst = new NativeImage(dw, dh, false);
 
         try {
-            // Yarn 1.20.1+build.10: getColor / setColor
             for (int y = 0; y < dh; y++) {
                 int srcY = Math.min(sh - 1, (int) (y / scale));
                 for (int x = 0; x < dw; x++) {
@@ -176,12 +304,20 @@ public class WebScreenBlockEntity extends BlockEntity {
             src.close();
             return dst;
         } catch (Exception e) {
-            // 逐像素访问异常时，使用 fillRect 填充纯色作为降级
             LOGGER.warn("逐像素缩放失败，使用降级方案: {}", e.getMessage());
             dst.fillRect(0, 0, dw, dh, 0xFF333333);
             src.close();
             return dst;
         }
+    }
+
+    /**
+     * 强制刷新截图。GUI 刷新按钮调用。
+     */
+    public void forceRefresh() {
+        if (url == null || url.isEmpty()) return;
+        lastRequestTime = 0;
+        errorState = null;
     }
 
     /**
@@ -196,20 +332,6 @@ public class WebScreenBlockEntity extends BlockEntity {
         }
     }
 
-    /**
-     * 获取错误状态（null 表示无错误）。
-     */
-    public String getErrorState() {
-        return errorState;
-    }
-
-    /**
-     * 是否有错误状态。
-     */
-    public boolean hasError() {
-        return errorState != null;
-    }
-
     // ===== Getters / Setters =====
 
     public String getUrl() {
@@ -218,7 +340,7 @@ public class WebScreenBlockEntity extends BlockEntity {
 
     public void setUrl(String url) {
         this.url = url != null ? url : "";
-        this.lastRequestTime = 0; // 强制立即刷新
+        this.lastRequestTime = 0;
         this.errorState = null;
         markDirty();
     }
@@ -241,7 +363,32 @@ public class WebScreenBlockEntity extends BlockEntity {
         markDirty();
     }
 
+    public boolean isClickEnabled() {
+        return clickEnabled;
+    }
+
+    public void setClickEnabled(boolean enabled) {
+        this.clickEnabled = enabled;
+        markDirty();
+    }
+
     public boolean isRequestInProgress() {
         return requestInProgress;
+    }
+
+    public boolean isClickInProgress() {
+        return clickInProgress;
+    }
+
+    public String getClickStatus() {
+        return clickStatus;
+    }
+
+    public String getErrorState() {
+        return errorState;
+    }
+
+    public boolean hasError() {
+        return errorState != null;
     }
 }

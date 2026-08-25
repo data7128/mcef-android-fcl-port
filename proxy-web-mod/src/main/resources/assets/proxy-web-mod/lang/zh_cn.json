@@ -7,6 +7,8 @@
   "proxy-web-mod.gui.interval": "间隔(秒)",
   "proxy-web-mod.gui.save": "保存",
   "proxy-web-mod.gui.cancel": "取消",
+  "proxy-web-mod.gui.refresh": "刷新截图",
   "proxy-web-mod.gui.clear_url": "清除网址",
+  "proxy-web-mod.gui.click_toggle": "模拟点击",
   "proxy-web-mod.gui.error": "错误"
 }
