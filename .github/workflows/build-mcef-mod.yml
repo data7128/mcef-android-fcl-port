@@ -56,6 +56,10 @@ jobs:
             gradle wrapper --gradle-version 8.12 --distribution-type bin
           fi
 
+      - name: Clone java-cef bindings
+        working-directory: mcef-android
+        run: ./gradlew cloneJcef --stacktrace || true
+
       - name: Build Fabric mod
         working-directory: mcef-android
         run: ./gradlew build --stacktrace
