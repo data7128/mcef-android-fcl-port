@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "proxy-web-mod",
+  "version": "${version}",
+  "name": "Proxy Web Mod",
+  "description": "代理式轻量替代模组 — 通过 Android 系统 WebView 截图替代 CEF 离屏渲染",
+  "authors": [
+    "mcef-android-fcl-port"
+  ],
+  "contact": {
+    "homepage": "https://github.com/mcef-android-fcl-port/mcef-android-fcl-port",
+    "sources": "https://github.com/mcef-android-fcl-port/mcef-android-fcl-port"
+  },
+  "license": "LGPL-2.1-or-later",
+  "icon": "assets/proxy-web-mod/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.cinemamod.mcef.proxy.ProxyWebMod"
+    ]
+  },
+  "mixins": [
+    "proxy-web-mod.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.15.7",
+    "minecraft": "~1.20.1",
+    "java": ">=17",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "mcef": "*"
+  }
+}

@@ -1,0 +1,15 @@
+# MCEF Android Fork Source
+
+此目录存放魔改 MCEF 模组源码（Fork of CinemaMod/mcef）。
+
+来源仓库: https://github.com/CinemaMod/mcef
+许可证: LGPL-2.1-or-later
+
+修改点:
+- common/src/main/java/com/cinemamod/mcef/MCEFPlatform.java — 新增 ANDROID_ARM64 枚举
+- common/src/main/java/com/cinemamod/mcef/CefUtil.java — 路径与 CefSettings 适配
+- common/src/main/java/com/cinemamod/mcef/MCEFRenderer.java — OpenGL ES 纹理格式适配
+- common/src/main/java/com/cinemamod/mcef/MCEF.java — 初始化逻辑 Android 分支
+- fabric/build.gradle — Minecraft 1.20.1 Fabric 依赖配置
+
+所有修改放在 feature/dev-cef-android 分支，不修改上游 main 分支。

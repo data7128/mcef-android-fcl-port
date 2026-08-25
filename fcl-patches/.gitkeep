@@ -1,0 +1,21 @@
+# FCL Launcher Patches
+
+此目录存放 FCL (FoldCraftLauncher) 启动器源码补丁。
+
+来源仓库: https://github.com/FCL-Team/FoldCraftLauncher
+
+修改点:
+- FCL/build.gradle.kts — jniLibs 打包配置，libcef.so 放入 arm64-v8a
+- FCL/src/main/java/.../FCLBridge.java — Context/Surface 代理传递
+- FCL/src/main/java/.../JVMActivity.java — 初始化时保存 Context
+- FCL/src/main/jni/fcl/fcl_bridge.c — passContextToCEF JNI 函数
+- FCL/src/main/jni/CMakeLists.txt — CEF 桥接库 target
+
+补丁文件:
+- java-patches/FCLBridge.patch
+- java-patches/JVMActivity.patch
+- jni-patches/fcl_bridge.patch
+- jni-patches/CMakeLists.patch
+- build-gradle.patch
+
+所有修改放在 feature/dev-cef-android 分支，不修改上游 main 分支。

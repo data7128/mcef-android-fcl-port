@@ -1,0 +1,14 @@
+# WebDisplays Android Adaptation
+
+此目录存放 WebDisplays 适配源码（Fork of CinemaMod/webdisplays）。
+
+来源仓库: https://github.com/CinemaMod/webdisplays
+
+修改点:
+- WebDisplays.java — Forge @Mod 注解迁移为 Fabric 入口
+- ClientProxy.java — CefInitEvent 事件注册迁移到 Fabric
+- ScreenRenderer.java — RenderSystem API 兼容性适配
+- TileEntityScreen.java — BlockEntity 注册迁移到 Fabric
+- build.gradle — ForgeGradle 迁移为 Fabric Loom
+
+所有修改放在 feature/dev-cef-android 分支，不修改上游 main 分支。

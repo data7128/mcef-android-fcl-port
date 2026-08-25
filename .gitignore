@@ -1,0 +1,42 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Minecraft dev
+run/
+runs/
+
+# Native libraries (built by CI, not committed)
+*.so
+*.dylib
+*.dll
+
+# CEF build artifacts
+libcef/
+cef_binary*/
+out/
+
+# Crash logs
+hs_err_pid*
+replay_pid*
+
+# Android
+*.apk
+*.aab
+*.keystore
+*.jks
