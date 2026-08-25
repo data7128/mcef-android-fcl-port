@@ -121,8 +121,8 @@ public class WebScreenGUI extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        // 1.20.1 使用 DrawContext 替代 MatrixStack
-        this.renderBackground(context, mouseX, mouseY, delta);
+        // 1.20.1: renderBackground 只接受 DrawContext 参数
+        this.renderBackground(context);
 
         // 标题
         context.drawTextWithShadow(this.textRenderer,

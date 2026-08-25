@@ -151,9 +151,8 @@ public class WebScreenBlockEntity extends BlockEntity {
 
     /**
      * 缩小 NativeImage 到最大边长。
-     * Yarn 1.20.1+build.10 中 getPixelRGBA 可能不存在，
-     * 使用 NativeImageBackedTexture 的 getImage() + setPixelRGBA 替代方案。
-     * 如无法逐像素访问，直接返回原图（接受可能的大纹理）。
+     * Yarn 1.20.1+build.10 中使用 getColor / setColor 进行逐像素操作。
+     * 使用 fillRect 作为降级方案（当逐像素访问出现异常时）。
      */
     private NativeImage scaleDown(NativeImage src, int max) {
         int sw = src.getWidth();
@@ -166,25 +165,20 @@ public class WebScreenBlockEntity extends BlockEntity {
         NativeImage dst = new NativeImage(dw, dh, false);
 
         try {
-            // 尝试使用 getPixelRGBA（大多数 Yarn 版本支持）
+            // Yarn 1.20.1+build.10: getColor / setColor
             for (int y = 0; y < dh; y++) {
                 int srcY = Math.min(sh - 1, (int) (y / scale));
                 for (int x = 0; x < dw; x++) {
                     int srcX = Math.min(sw - 1, (int) (x / scale));
-                    dst.setPixelRGBA(x, y, src.getPixelRGBA(srcX, srcY));
+                    dst.setColor(x, y, src.getColor(srcX, srcY));
                 }
             }
             src.close();
             return dst;
-        } catch (NoSuchMethodError | Error e) {
-            // getPixelRGBA 不存在时，填充纯色作为降级
-            LOGGER.warn("getPixelRGBA 不可用，使用降级缩放: {}", e.getMessage());
-            int color = 0xFF333333;
-            for (int y = 0; y < dh; y++) {
-                for (int x = 0; x < dw; x++) {
-                    dst.setPixelRGBA(x, y, color);
-                }
-            }
+        } catch (Exception e) {
+            // 逐像素访问异常时，使用 fillRect 填充纯色作为降级
+            LOGGER.warn("逐像素缩放失败，使用降级方案: {}", e.getMessage());
+            dst.fillRect(0, 0, dw, dh, 0xFF333333);
             src.close();
             return dst;
         }
