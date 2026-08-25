@@ -3,7 +3,7 @@
 // 纯 Fabric Java 代码，FCL 可直接加载
 
 plugins {
-    id 'fabric-loom' version '1.7-SNAPSHOT'
+    id 'fabric-loom' version '1.7.1'
     id 'maven-publish'
 }
 
@@ -45,6 +45,6 @@ java {
 
 jar {
     from("LICENSE") {
-        rename { "${it}_${project.archivesBaseName}" }
+        rename { "${it}_${base.archivesName.get()}" }
     }
 }
