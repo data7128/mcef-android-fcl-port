@@ -17,6 +17,7 @@
 - [已知崩溃点](#已知崩溃点)
 - [项目结构](#项目结构)
 - [CI 工作流说明](#ci-工作流说明)
+- [相关文档](#相关文档)
 - [上游依赖](#上游依赖)
 - [许可证](#许可证)
 
@@ -34,7 +35,7 @@
 | CEF 依赖 | 无。不加载任何 native 库 |
 | FCL 修改 | 需要修改 FCL 启动器源码，集成 `WebViewScreenshotService`（见 `fcl-patches/`） |
 | 交互能力 | 无。只能显示静态截图，不支持点击/输入 |
-| 刷新率 | 每 2 秒一次截图请求（可配置） |
+| 刷新率 | 默认 120 秒一次截图请求（可在 GUI 中修改） |
 | 降级模式 | 截图服务不可用时显示灰色占位纹理，mod 不崩溃 |
 | CI 构建 | 已通过。免费 runner 可编译产出 jar |
 | 可用性 | 临时可用替代方案 |
@@ -255,7 +256,7 @@ gradle wrapper --gradle-version 8.12 --distribution-type bin
 
 #### 1. 构建 mod jar
 
-通过 CI 或本地构建获取 `proxy-web-mod-1.0.0.jar`。
+通过 CI 或本地构建获取 `proxy-web-mod-2.0.0.jar`。
 
 #### 2. 安装 FCL 启动器
 
@@ -290,7 +291,7 @@ gradle wrapper --gradle-version 8.12 --distribution-type bin
 
 #### 6. 预期结果
 
-- 截图服务可用：方块上显示网页截图内容（每 2 秒刷新）
+- 截图服务可用：方块上显示网页截图内容（按配置间隔刷新）
 - 截图服务不可用：方块上显示深灰色占位纹理
 - mod 不会导致游戏崩溃
 
@@ -332,9 +333,10 @@ gradle wrapper --gradle-version 8.12 --distribution-type bin
 mcef-android-fcl-port/
 ├── README.md                          # 本文件
 ├── LICENSE                            # LGPL-2.1
+├── EXPERIENCE-shturl.md               # 开发踩坑日志（完整记录）
 ├── .github/workflows/                 # CI 工作流
 │   ├── build-proxy-web-mod.yml        # 路线2: 代理截图 mod 构建（推荐）
-│   ├── build-cef-android.yml          # 路线1: CEF 编译（需付费 runner）
+│   ├── build-cef-android.yml          # 路线1: CEF 编译（已禁用，免费 runner OOM）
 │   ├── build-mcef-mod.yml             # 路线1: MCEF 模组构建（上游克隆）
 │   └── build-fcl-apk.yml              # 路线1: FCL APK 构建（需 Fork）
 ├── proxy-web-mod/                     # 路线2: 代理截图 mod 源码
@@ -343,12 +345,17 @@ mcef-android-fcl-port/
 │   ├── gradle.properties
 │   └── src/main/
 │       ├── java/com/cinemamod/mcef/proxy/
-│       │   ├── ProxyWebMod.java       # mod 入口
-│       │   ├── ProxyAPI.java          # HTTP 截图请求
-│       │   ├── ProxyBrowser.java      # 浏览器代理
-│       │   └── ProxyRenderer.java     # OpenGL ES 纹理上传
+│       │   ├── ProxyWebMod.java           # mod 入口（注册方块/物品/方块实体）
+│       │   ├── ProxyWebModClient.java     # 客户端入口（注册渲染器/右键交互）
+│       │   ├── ProxyConfig.java           # JSON 配置管理
+│       │   ├── ProxyAPI.java             # HTTP 截图请求（CompletableFuture）
+│       │   ├── WebScreenBlock.java        # 自定义方块（水平朝向）
+│       │   ├── WebScreenBlockEntity.java  # 方块实体（截图请求/纹理管理）
+│       │   ├── WebScreenBlockEntityRenderer.java # 渲染器（OpenGL ES 纹理绘制）
+│       │   └── WebScreenGUI.java          # 游戏内 GUI（URL输入/尺寸设置）
 │       └── resources/
-│           └── fabric.mod.json        # Fabric mod 元数据
+│           ├── fabric.mod.json             # Fabric mod 元数据（依赖 Fabric-API）
+│           └── assets/proxy-web-mod/       # 方块模型/语言文件/战利品表
 ├── fcl-patches/                       # FCL 启动器补丁源码
 │   └── src/main/java/com/cinemamod/mcef/proxy/
 │       └── WebViewScreenshotService.java  # WebView 截图 HTTP 服务
@@ -357,6 +364,8 @@ mcef-android-fcl-port/
 ├── webdisplays-android/               # WebDisplays 适配（预留）
 │   └── .gitkeep
 └── docs/                              # 文档
+    ├── CEF-PORT-FEASIBILITY.md        # CEF 移植可行性评估
+    ├── FCL-TROUBLESHOOTING.md         # FCL 安卓平台故障排查指南
     ├── architecture.html              # 架构方案
     └── cef-init-analysis.md            # CEF 初始化入口点详细分析
 ```
@@ -371,6 +380,16 @@ mcef-android-fcl-port/
 | `build-mcef-mod.yml` | push / 手动 | 免费 | 已通过（编译验证） |
 | `build-cef-android.yml` | 仅手动 | 免费/付费 | 免费 runner 必定 OOM |
 | `build-fcl-apk.yml` | 仅手动 | 免费 | 需先 Fork FCL |
+
+## 相关文档
+
+| 文档 | 说明 |
+|------|------|
+| [CEF-PORT-FEASIBILITY.md](docs/CEF-PORT-FEASIBILITY.md) | CEF 移植可行性评估：7 个不可绕过的技术障碍、编译硬件要求、现实结论 |
+| [FCL-TROUBLESHOOTING.md](docs/FCL-TROUBLESHOOTING.md) | FCL 安卓平台故障排查指南：依赖缺失、网络问题、GL4ES 贴图限制、内存溢出、Mixin 异常 |
+| [EXPERIENCE-shturl.md](EXPERIENCE-shturl.md) | 开发踩坑日志：GitHub Actions OOM、Activity 依赖、GL4ES 限制、代理 Mod 能力边界 |
+| [cef-init-analysis.md](docs/cef-init-analysis.md) | CEF 初始化入口点详细分析：调用链、必须修改的文件 |
+| [architecture.html](docs/architecture.html) | 架构方案可视化 |
 
 ---
 

@@ -6,6 +6,7 @@ import net.minecraft.client.render.Tessellator;
 import net.minecraft.client.render.VertexFormat;
 import net.minecraft.client.render.VertexFormats;
 import net.minecraft.client.render.block.entity.BlockEntityRenderer;
+import net.minecraft.client.render.block.entity.BlockEntityRendererFactory;
 import net.minecraft.client.render.BufferBuilder;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.util.math.Direction;
@@ -32,6 +33,10 @@ import org.joml.Matrix4f;
  * 许可证：LGPL-2.1-or-later
  */
 public class WebScreenBlockEntityRenderer implements BlockEntityRenderer<WebScreenBlockEntity> {
+
+    public WebScreenBlockEntityRenderer(BlockEntityRendererFactory.Context ctx) {
+        // Context 当前未使用，但 Fabric API 注册要求此构造函数
+    }
 
     @Override
     public void render(WebScreenBlockEntity entity, float tickDelta,

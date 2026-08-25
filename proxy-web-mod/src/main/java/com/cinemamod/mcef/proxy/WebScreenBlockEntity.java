@@ -92,10 +92,15 @@ public class WebScreenBlockEntity extends BlockEntity {
     private void requestScreenshotAsync() {
         ProxyAPI.requestScreenshotPNG(url, textureWidth, textureHeight)
                 .thenAccept(bytes -> {
-                    pendingPng = bytes;
-                    errorState = null;
+                    if (bytes != null && bytes.length > 0) {
+                        pendingPng = bytes;
+                        errorState = null;
+                        LOGGER.debug("截图完成: url={}, size={}bytes", url, bytes.length);
+                    } else {
+                        errorState = "截图服务返回空数据";
+                        LOGGER.warn("截图返回空数据: url={}", url);
+                    }
                     requestInProgress = false;
-                    LOGGER.debug("截图完成: url={}, size={}bytes", url, bytes.length);
                 })
                 .exceptionally(e -> {
                     errorState = e.getMessage() != null ? e.getMessage() : e.toString();
