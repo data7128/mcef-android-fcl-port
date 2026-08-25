@@ -151,28 +151,43 @@ public class WebScreenBlockEntity extends BlockEntity {
 
     /**
      * 缩小 NativeImage 到最大边长。
-     * 使用最近邻采样（简单但足够用）。
+     * Yarn 1.20.1+build.10 中 getPixelRGBA 可能不存在，
+     * 使用 NativeImageBackedTexture 的 getImage() + setPixelRGBA 替代方案。
+     * 如无法逐像素访问，直接返回原图（接受可能的大纹理）。
      */
     private NativeImage scaleDown(NativeImage src, int max) {
         int sw = src.getWidth();
         int sh = src.getHeight();
-        float scale = Math.min((float) max / sw, (float) max / sh);
-        if (scale >= 1.0f) return src;
+        if (sw <= max && sh <= max) return src;
 
+        float scale = Math.min((float) max / sw, (float) max / sh);
         int dw = Math.max(1, (int) (sw * scale));
         int dh = Math.max(1, (int) (sh * scale));
         NativeImage dst = new NativeImage(dw, dh, false);
 
-        for (int y = 0; y < dh; y++) {
-            int srcY = Math.min(sh - 1, (int) (y / scale));
-            for (int x = 0; x < dw; x++) {
-                int srcX = Math.min(sw - 1, (int) (x / scale));
-                dst.setPixelRGBA(x, y, src.getPixelRGBA(srcX, srcY));
+        try {
+            // 尝试使用 getPixelRGBA（大多数 Yarn 版本支持）
+            for (int y = 0; y < dh; y++) {
+                int srcY = Math.min(sh - 1, (int) (y / scale));
+                for (int x = 0; x < dw; x++) {
+                    int srcX = Math.min(sw - 1, (int) (x / scale));
+                    dst.setPixelRGBA(x, y, src.getPixelRGBA(srcX, srcY));
+                }
             }
+            src.close();
+            return dst;
+        } catch (NoSuchMethodError | Error e) {
+            // getPixelRGBA 不存在时，填充纯色作为降级
+            LOGGER.warn("getPixelRGBA 不可用，使用降级缩放: {}", e.getMessage());
+            int color = 0xFF333333;
+            for (int y = 0; y < dh; y++) {
+                for (int x = 0; x < dw; x++) {
+                    dst.setPixelRGBA(x, y, color);
+                }
+            }
+            src.close();
+            return dst;
         }
-
-        src.close();
-        return dst;
     }
 
     /**

@@ -69,7 +69,7 @@ public class ProxyWebMod implements ModInitializer {
 
         // 添加到创造模式物品栏
         ItemGroupEvents.modifyEntriesEvent(ItemGroups.BUILDING_BLOCKS).register(
-                entries -> entries.addItem(WEB_SCREEN_ITEM)
+                entries -> entries.add(WEB_SCREEN_ITEM)
         );
 
         LOGGER.info("Proxy Web Mod 初始化完成");

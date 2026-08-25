@@ -1,5 +1,6 @@
 package com.cinemamod.mcef.proxy;
 
+import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
@@ -119,48 +120,43 @@ public class WebScreenGUI extends Screen {
     }
 
     @Override
-    public void render(net.minecraft.client.util.math.MatrixStack matrices,
-                       int mouseX, int mouseY, float delta) {
-        renderBackground(matrices);
+    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        // 1.20.1 使用 DrawContext 替代 MatrixStack
+        this.renderBackground(context, mouseX, mouseY, delta);
 
         // 标题
-        drawTextWithShadow(matrices, this.textRenderer,
+        context.drawTextWithShadow(this.textRenderer,
                 Text.literal("网页显示设置"), width / 2 - 40, 30, 0xFFFFFF);
 
         // 标签
-        drawTextWithShadow(matrices, this.textRenderer,
+        context.drawTextWithShadow(this.textRenderer,
                 Text.literal("网址:"), width / 2 - 130, 65, 0xAAAAAA);
-        drawTextWithShadow(matrices, this.textRenderer,
+        context.drawTextWithShadow(this.textRenderer,
                 Text.literal("宽:"), width / 2 - 115, 100, 0xAAAAAA);
-        drawTextWithShadow(matrices, this.textRenderer,
+        context.drawTextWithShadow(this.textRenderer,
                 Text.literal("高:"), width / 2 - 35, 100, 0xAAAAAA);
-        drawTextWithShadow(matrices, this.textRenderer,
+        context.drawTextWithShadow(this.textRenderer,
                 Text.literal("间隔(秒):"), width / 2 + 20, 100, 0xAAAAAA);
 
         // 错误状态
         if (blockEntity.hasError()) {
-            drawTextWithShadow(matrices, this.textRenderer,
+            context.drawTextWithShadow(this.textRenderer,
                     Text.literal("错误: " + blockEntity.getErrorState())
                             .formatted(Formatting.RED),
                     10, height - 20, 0xFF5555);
         }
 
         // 输入框
-        urlField.render(matrices, mouseX, mouseY, delta);
-        widthField.render(matrices, mouseX, mouseY, delta);
-        heightField.render(matrices, mouseX, mouseY, delta);
-        intervalField.render(matrices, mouseX, mouseY, delta);
+        urlField.render(context, mouseX, mouseY, delta);
+        widthField.render(context, mouseX, mouseY, delta);
+        heightField.render(context, mouseX, mouseY, delta);
+        intervalField.render(context, mouseX, mouseY, delta);
 
-        super.render(matrices, mouseX, mouseY, delta);
+        super.render(context, mouseX, mouseY, delta);
     }
 
     @Override
     public boolean shouldPause() {
         return false;
-    }
-
-    @Override
-    public void close() {
-        super.close();
     }
 }
