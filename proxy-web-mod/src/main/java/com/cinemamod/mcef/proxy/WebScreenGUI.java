@@ -4,7 +4,6 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.CyclingButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.render.BufferBuilder;
 import net.minecraft.client.render.GameRenderer;
@@ -118,11 +117,14 @@ public class WebScreenGUI extends Screen {
         }).dimensions(centerX + 80, 120, 70, 20).build());
 
         // 模拟点击开关
-        addDrawableChild(CyclingButtonWidget.onOffBuilder(blockEntity.isClickEnabled())
-                .dimensions(centerX - 70, 150, 140, 20)
-                .build(Text.literal("模拟点击"), (widget, value) -> {
-                    blockEntity.setClickEnabled(value);
-                }));
+        addDrawableChild(ButtonWidget.builder(
+                Text.literal("模拟点击: " + (blockEntity.isClickEnabled() ? "开" : "关")),
+                button -> {
+                    boolean newState = !blockEntity.isClickEnabled();
+                    blockEntity.setClickEnabled(newState);
+                    button.setMessage(Text.literal("模拟点击: " + (newState ? "开" : "关")));
+                }
+        ).dimensions(centerX - 70, 150, 140, 20).build());
     }
 
     private void saveSettings() {
