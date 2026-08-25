@@ -1,56 +1,395 @@
 # mcef-android-fcl-port
 
-> Experimental port of MCEF & WebDisplays for FoldCraft Launcher Android arm64-v8a,
-> experimental branch only, no stable guarantee.
+> 将 MCEF & WebDisplays 移植到 Android FoldCraft Launcher (FCL) 的实验性项目。
+> Fabric 1.20.1，目标架构 arm64-v8a。
+>
+> **本项目不保证任何功能可正常运行。** 所有实验性修改放在 `feature/dev-cef-android` 分支。
 
-## 项目限制
+---
 
-本项目受以下 Android 平台硬限制，**不保证可编译成功或正常运行**：
+## 目录
 
-1. **Android 10+ W^X 安全策略**：SELinux 和动态链接器禁止从应用缓存/文件目录
-   `dlopen()` native 库。libcef.so 必须内置进 FCL APK 的 jniLibs 目录，
-   仅靠独立 Fabric 模组无法完成。
-2. **FCL 内部 Java 环境限制**：Minecraft JVM 线程不直接持有 Android
-   Activity/Context/Surface，CEF 初始化可能因缺少系统组件而失败。
-3. **GitHub runner 内存限制**：Chromium 源码编译需要 16GB+ RAM、100GB+ 磁盘，
-   免费 GitHub Actions runner (16GB RAM / 14GB SSD) 大概率 OOM，
-   需要付费 larger runner 或自建编译环境。
-4. **官方 CEF 不支持 Android**：CEF 官方无 Android 构建，需从 Chromium for
-   Android 源码自行编译，API 与桌面 CEF 不兼容。
+- [两条路线](#两条路线)
+- [Android 硬限制（无法绕过）](#android-硬限制无法绕过)
+- [CEF 初始化入口点分析](#cef-初始化入口点分析)
+- [构建步骤](#构建步骤)
+- [真机测试步骤](#真机测试步骤)
+- [已知崩溃点](#已知崩溃点)
+- [项目结构](#项目结构)
+- [CI 工作流说明](#ci-工作流说明)
+- [上游依赖](#上游依赖)
+- [许可证](#许可证)
 
-## 上游依赖开源项目
+---
 
-- [MCEF](https://github.com/CinemaMod/mcef) (LGPL-2.1) — Java 模组 + JNI 绑定
-- [WebDisplays](https://github.com/CinemaMod/webdisplays) — Minecraft 浏览器屏幕方块
-- [FoldCraftLauncher](https://github.com/FCL-Team/FoldCraftLauncher) — Android Minecraft Java 启动器
+## 两条路线
+
+本项目提供两条互斥的技术路线：
+
+### 路线 2：代理截图模组（推荐，可立即落地）
+
+| 项目 | 说明 |
+|------|------|
+| 原理 | Fabric mod 通过 HTTP 调用 WebView 截图服务，将网页静态画面渲染到 MC 方块纹理 |
+| CEF 依赖 | 无。不加载任何 native 库 |
+| FCL 修改 | 需要修改 FCL 启动器源码，集成 `WebViewScreenshotService`（见 `fcl-patches/`） |
+| 交互能力 | 无。只能显示静态截图，不支持点击/输入 |
+| 刷新率 | 每 2 秒一次截图请求（可配置） |
+| 降级模式 | 截图服务不可用时显示灰色占位纹理，mod 不崩溃 |
+| CI 构建 | 已通过。免费 runner 可编译产出 jar |
+| 可用性 | 临时可用替代方案 |
+
+### 路线 1：原生 CEF 移植（理论方案，当前不可行）
+
+| 项目 | 说明 |
+|------|------|
+| 原理 | 编译 Android arm64 版 libcef.so，通过 JNI 在 FCL 的 JVM 中加载 |
+| CEF 依赖 | 完整 CEF runtime（libcef.so + libjcef.so + jcef_helper + locales） |
+| Activity 依赖 | CEF 初始化需要 Android Activity，FCL 只能提供 Application Context |
+| 子进程 | CEF 需要 jcef_helper 子进程，Android 不支持传统子进程模型 |
+| CI 构建 | 免费 runner 必定 OOM。需 32+ core / 64GB+ RAM 付费 runner |
+| 官方支持 | MCEF README 明确声明 "This mod will not work on Android" |
+| JCEF Android | java-cef 项目无 Android 移植，API 不兼容 |
+| 可用性 | 技术死胡同，见下方详细分析 |
+
+### 路线取舍
+
+| 维度 | 路线 2（代理截图） | 路线 1（原生 CEF） |
+|------|-------------------|-------------------|
+| 可立即使用 | 是 | 否 |
+| 显示网页内容 | 静态截图 | 完整交互 |
+| 点击/输入支持 | 否 | 理论上可以 |
+| 视频播放 | 否（逐帧截图太慢） | 是 |
+| 需要 FCL 修改 | 是（集成截图服务） | 是（内置 libcef.so） |
+| CI 可构建 | 是 | 否（需付费 runner） |
+| 系统级限制 | WebView Context 问题 | Activity + 子进程 + W^X 多重限制 |
+| 推荐程度 | 优先采用 | 仅作技术调研 |
+
+---
+
+## Android 硬限制（无法绕过）
+
+以下限制是 Android 操作系统级别的安全策略，**不可能通过 Fabric mod 代码绕过**：
+
+### 1. W^X 内存策略 (Android 10+)
+
+SELinux 和动态链接器禁止从应用缓存/文件目录 `dlopen()` native 库。
+`libcef.so` 必须内置进 FCL APK 的 `jniLibs/` 目录才能加载。
+纯 Fabric mod 无法携带并加载 `.so` 文件。
+
+**影响**：路线 1 无法仅通过 Fabric mod 分发 CEF runtime，必须重新打包 FCL APK。
+
+### 2. Activity 依赖
+
+FCL 启动器在运行 Minecraft 时，Java 线程持有的是 `Application Context`，不是 `Activity`。
+CEF 初始化链路中的多个 JNI 调用需要 Android `Activity` 引用（窗口管理、输入事件分发、生命周期回调）。
+
+**影响**：
+- 路线 1 的 CEF 初始化会在 `CefApp.getInstance()` 阶段崩溃
+- 路线 2 的 WebView 创建也可能因 Application Context 而失败（Android 版本相关）
+
+### 3. 子进程模型
+
+CEF 的渲染器和 GPU 进程通过 `jcef_helper` 可执行文件启动。
+Android 应用不能自由 fork 子进程执行二进制文件。
+
+**影响**：路线 1 的 CEF 多进程架构在 Android 上根本无法工作。
+单进程模式（`--single-process`）可能绕过此限制，但极不稳定。
+
+### 4. OpenGL 差异
+
+MCEF 使用桌面 OpenGL（`GL_BGRA`、`GL_UNSIGNED_INT_8_8_8_8_REV`）。
+Android 仅支持 OpenGL ES，不提供这些格式。
+
+**影响**：路线 1 需要重写 MCEF 的 `CefRenderer.java`，改用 `GL_RGBA` + `GL_UNSIGNED_BYTE`。
+路线 2 的 `ProxyRenderer.java` 已经使用 OpenGL ES 兼容格式。
+
+### 5. GitHub Actions 资源限制
+
+Chromium 源码编译需要：
+- 磁盘：100GB+（免费 runner 仅 14GB SSD）
+- 内存：32GB+（免费 runner 仅 16GB）
+- 时间：6+ 小时（超过 Actions 6 小时超时）
+
+**影响**：路线 1 的 CEF 编译在免费 CI 上必定失败。需付费 larger runner 或自建编译环境。
+
+### 6. 官方 CEF 不支持 Android
+
+CEF 官方不提供 Android 预编译包。
+必须从 Chromium for Android 源码自行编译，API 与桌面 CEF 不兼容。
+java-cef 项目（JCEF）也没有 Android 移植。
+
+---
+
+## CEF 初始化入口点分析
+
+基于对 [CinemaMod/mcef](https://github.com/CinemaMod/mcef) 上游源码的完整分析。
+
+### 初始化调用链
+
+```
+Minecraft 启动
+  → MCEF.onPreInit()
+      → 加载 mcef.cfg 配置
+      → 导入 Let's Encrypt SSL 证书
+      → ClientProxy.onPreInit()
+  → MCEF.onInit()
+      → ClientProxy.onInit()
+          → RemoteConfig.downloadMissing()     ← 下载 native 资源
+          → 修改 ClassLoader.usr_paths          ← 注入 native 库搜索路径
+          → System.load("libcef.so")           ← 加载 native 库
+          → CefApp.startup()                    ← CEF 全局初始化
+          → CefApp.getInstance(settings)        ← 创建 CEF 实例
+              → N_PreInitialize()               ← JNI 调用
+              → N_Initialize()                  ← JNI 调用（需要窗口系统）
+          → cefApp.createClient()               ← 创建 CefClient
+  → 每帧渲染 tick
+      → cefApp.N_DoMessageLoopWork()           ← CEF 消息循环
+      → browser.mcefUpdate()                   ← 上传 BGRA 帧到 OpenGL 纹理
+  → 关闭
+      → ClientProxy.onShutdown()
+      → cefClient.dispose()
+      → CefApp.N_Shutdown()
+```
+
+### 必须修改的关键文件
+
+| 文件 | 职责 | Android 问题 |
+|------|------|-------------|
+| `ClientProxy.java` | CEF 初始化中心 | native 库加载路径、子进程路径 |
+| `CefApp.java` | CEF 生命周期管理 | `N_Initialize()` 需要窗口系统 |
+| `CefBrowserOsr.java` | 离屏渲染浏览器 | OSR 模式可能依赖桌面 GL |
+| `CefRenderer.java` | OpenGL 纹理上传 | 使用 `GL_BGRA`，Android 不支持 |
+| `RemoteConfig.java` | 下载 native 资源 | 下载 Windows/Linux/macOS 库，无 Android |
+| `OS.java` | 平台判断 | 不识别 Android |
+
+### Activity 依赖分析
+
+MCEF 本身不直接引用 Android `Activity`，但 CEF/JCEF 的 JNI 层在以下位置隐式依赖窗口系统：
+
+1. `CefApp.N_Initialize()` — 初始化 CEF 运行时，内部需要操作系统窗口管理器
+2. `CefClient.createBrowser()` — 创建浏览器实例，需要窗口句柄或渲染上下文
+3. `CefApp.N_DoMessageLoopWork()` — 消息循环处理，依赖平台事件系统
+4. `jcef_helper` 子进程 — CEF 多进程架构需要可执行子进程
+
+在 Android 上，这些 JNI 调用会因缺少 `Activity`、窗口句柄、子进程支持而失败。
+这是 CEF/JCEF 架构层面的不兼容，**不是简单的 API 包装可以解决的**。
+
+完整分析详见 [docs/cef-init-analysis.md](docs/cef-init-analysis.md)。
+
+---
+
+## 构建步骤
+
+### 路线 2：代理截图模组（推荐）
+
+#### 前置条件
+- JDK 17+
+- Gradle 8.5+（或使用项目内 `gradlew`）
+- 网络连接（下载 Minecraft mappings 和 Fabric API）
+
+#### 构建命令
+
+```bash
+cd proxy-web-mod
+gradle wrapper --gradle-version 8.5 --distribution-type bin
+./gradlew build
+# 产出: build/libs/proxy-web-mod-1.0.0.jar
+```
+
+#### CI 自动构建
+
+GitHub Actions 工作流 `build-proxy-web-mod.yml` 会在以下情况自动触发：
+- push 到 `proxy-web-mod/` 目录
+- 手动触发（workflow_dispatch）
+
+构建产物上传为 Artifact（保留 30 天）。
+
+### 路线 1：MCEF 模组构建（仅验证编译）
+
+#### 前置条件
+- JDK 21+
+- Gradle 8.12+
+
+#### 构建命令
+
+CI 会自动克隆上游 CinemaMod/mcef 并编译。本地构建需手动克隆：
+
+```bash
+git clone --depth 1 https://github.com/CinemaMod/mcef.git mcef-android
+cd mcef-android
+git submodule update --init --recursive --depth 1
+gradle wrapper --gradle-version 8.12 --distribution-type bin
+./gradlew build
+```
+
+**注意**：编译成功不等于可在 Android FCL 上运行。MCEF 上游明确不支持 Android。
+
+### 路线 1：CEF 编译（需付费 runner）
+
+**免费 GitHub Actions runner 无法完成此构建。**
+
+可行方案：
+1. 使用 GitHub 付费 larger runner（32+ cores, 64GB+ RAM）
+2. 自建 Linux 编译服务器（64GB RAM, 200GB SSD）
+3. 使用 Google Cloud Build 或 AWS CodeBuild
+
+手动触发 `build-cef-android.yml` 工作流，选择 runner 类型。
+预计编译时间：4-8 小时（32-core runner）。
+
+### FCL APK 构建
+
+前提条件：
+1. 已 Fork [FoldCraftLauncher](https://github.com/FCL-Team/FoldCraftLauncher)
+2. Fork 仓库有 `feature/dev-cef-android` 分支
+3. 已产出 `libcef.so` artifact（来自 CEF 编译工作流）
+4. FCL 源码已集成 `WebViewScreenshotService`
+
+手动触发 `build-fcl-apk.yml` 工作流。
+
+---
+
+## 真机测试步骤
+
+### 路线 2 测试
+
+#### 1. 构建 mod jar
+
+通过 CI 或本地构建获取 `proxy-web-mod-1.0.0.jar`。
+
+#### 2. 安装 FCL 启动器
+
+从 [FCL Releases](https://github.com/FCL-Team/FoldCraftLauncher/releases) 安装最新版 FCL。
+
+#### 3. 放置 mod
+
+将 `proxy-web-mod-1.0.0.jar` 放入 FCL 的 mods 目录：
+```
+/storage/emulated/0/Android/data/com.fcl.launcher/files/games/com.mojang/mods/
+```
+
+#### 4. （可选）集成 WebView 截图服务
+
+如果已修改 FCL 源码集成了 `WebViewScreenshotService`：
+- FCL 启动时会自动在 localhost:28085 启动截图服务
+- mod 会通过 HTTP 获取网页截图
+
+如果未修改 FCL：
+- mod 以降级模式运行，显示灰色占位纹理
+- 可通过环境变量 `PROXY_WEB_SERVICE_URL` 指向远程截图服务
+
+#### 5. 启动 Minecraft
+
+在 FCL 中启动 Minecraft 1.20.1 with Fabric。
+查看日志确认 mod 加载成功：
+```
+[proxy-web-mod] Proxy Web Mod 初始化中...
+[proxy-web-mod] 此模组不依赖 CEF native 库，使用 WebView 截图代理方案
+[proxy-web-mod] Proxy API 初始化成功/失败
+```
+
+#### 6. 预期结果
+
+- 截图服务可用：方块上显示网页截图内容（每 2 秒刷新）
+- 截图服务不可用：方块上显示深灰色占位纹理
+- mod 不会导致游戏崩溃
+
+### 路线 1 测试
+
+路线 1 当前不可行，无法进行真机测试。
+需要先解决 CEF Android 编译、Activity 封装、子进程模型等全部障碍。
+
+---
+
+## 已知崩溃点
+
+### 路线 2 已知问题
+
+| 崩溃点 | 原因 | 状态 |
+|--------|------|------|
+| `WebView` 创建失败 | Application Context 无 Activity，部分 Android 版本拒绝创建 WebView | 已加 try-catch，降级为占位纹理 |
+| WebView `draw()` 返回空白 | 后台无 Surface 时渲染管线不输出画面 | 已知限制，无法修复 |
+| 截图超时（10秒） | WebView 加载慢或卡死 | 已加超时处理，返回占位纹理 |
+| HTTP 连接失败 | 截图服务未启动或端口被占用 | 已加降级模式 |
+
+### 路线 1 已知死胡同
+
+| 死胡同 | 原因 | 可否绕过 |
+|--------|------|---------|
+| CEF 无 Android 构建 | 官方不提供 Android 预编译包，需从 Chromium 源码编译 | 需付费编译环境 |
+| JCEF 无 Android 移植 | java-cef 项目不支持 Android | 需自行移植 JCEF Java 层 |
+| Activity 初始化 | CEF JNI 初始化需要窗口系统 | 需实现虚拟 Activity（理论上可行但极其复杂） |
+| 子进程模型 | jcef_helper 无法在 Android 上运行 | 可尝试 `--single-process` 模式（极不稳定） |
+| W^X 禁止 dlopen | libcef.so 无法从 mod 目录加载 | 必须重新打包 FCL APK |
+| OpenGL 格式 | MCEF 使用 GL_BGRA，Android 仅支持 GL_RGBA | 需修改 CefRenderer |
+| 消息循环 | CEF 消息循环与 Android Looper 不兼容 | 需自定义桥接层 |
+
+---
 
 ## 项目结构
 
 ```
 mcef-android-fcl-port/
-├── README.md                     # 本文件
-├── LICENSE                       # LGPL-2.1
-├── .github/workflows/            # CI 工作流脚本
-├── mcef-android/                 # 魔改 MCEF 模组源码 (Fork of CinemaMod/mcef)
-├── fcl-patches/                  # FCL 启动器源码补丁 (Fork of FCL-Team/FoldCraftLauncher)
-├── webdisplays-android/          # WebDisplays 适配 (Fork of CinemaMod/webdisplays)
-├── proxy-web-mod/                # 代理式轻量替代模组（不依赖 CEF native 库）
-└── docs/                         # 架构文档
-    └── architecture.html         # 完整移植架构方案
+├── README.md                          # 本文件
+├── LICENSE                            # LGPL-2.1
+├── .github/workflows/                 # CI 工作流
+│   ├── build-proxy-web-mod.yml        # 路线2: 代理截图 mod 构建（推荐）
+│   ├── build-cef-android.yml          # 路线1: CEF 编译（需付费 runner）
+│   ├── build-mcef-mod.yml             # 路线1: MCEF 模组构建（上游克隆）
+│   └── build-fcl-apk.yml              # 路线1: FCL APK 构建（需 Fork）
+├── proxy-web-mod/                     # 路线2: 代理截图 mod 源码
+│   ├── build.gradle
+│   ├── settings.gradle
+│   ├── gradle.properties
+│   └── src/main/
+│       ├── java/com/cinemamod/mcef/proxy/
+│       │   ├── ProxyWebMod.java       # mod 入口
+│       │   ├── ProxyAPI.java          # HTTP 截图请求
+│       │   ├── ProxyBrowser.java      # 浏览器代理
+│       │   └── ProxyRenderer.java     # OpenGL ES 纹理上传
+│       └── resources/
+│           └── fabric.mod.json        # Fabric mod 元数据
+├── fcl-patches/                       # FCL 启动器补丁源码
+│   └── src/main/java/com/cinemamod/mcef/proxy/
+│       └── WebViewScreenshotService.java  # WebView 截图 HTTP 服务
+├── mcef-android/                      # 路线1: MCEF 源码（CI 自动克隆）
+│   └── .gitkeep
+├── webdisplays-android/               # WebDisplays 适配（预留）
+│   └── .gitkeep
+└── docs/                              # 文档
+    ├── architecture.html              # 架构方案
+    └── cef-init-analysis.md            # CEF 初始化入口点详细分析
 ```
 
-## 分支说明
+---
 
-- `main` — 不使用 main 作为实验分支
-- `feature/dev-cef-android` — 所有实验性修改放在此分支
+## CI 工作流说明
+
+| 工作流 | 触发方式 | runner | 状态 |
+|--------|---------|--------|------|
+| `build-proxy-web-mod.yml` | push / 手动 | 免费 | 已通过 |
+| `build-mcef-mod.yml` | push / 手动 | 免费 | 已通过（编译验证） |
+| `build-cef-android.yml` | 仅手动 | 免费/付费 | 免费 runner 必定 OOM |
+| `build-fcl-apk.yml` | 仅手动 | 免费 | 需先 Fork FCL |
+
+---
+
+## 上游依赖
+
+- [MCEF](https://github.com/CinemaMod/mcef) (LGPL-2.1) — Java 模组 + JNI 绑定
+- [WebDisplays](https://github.com/CinemaMod/webdisplays) — Minecraft 浏览器屏幕方块
+- [FoldCraftLauncher](https://github.com/FCL-Team/FoldCraftLauncher) — Android Minecraft Java 启动器
+- [Chromium](https://www.chromium.org/) / [CEF](https://bitbucket.org/chromiumembedded/cef/) — 底层浏览器引擎
+
+---
 
 ## 许可证
 
 LGPL-2.1-or-later（沿用上游 MCEF 许可证）
 
-## 重要开源规则
+## 开源规则
 
 1. 遵守 MCEF 的 LGPL-2.1 许可证；修改后的源码必须公开
 2. 不直接修改各上游仓库 main 主分支；所有修改放在独立 Fork 的 feature 分支
-3. 不使用预编译好的 libcef.so；Android-CEF 必须由 CI 从源码编译
+3. 不使用预编译的 libcef.so；Android-CEF 必须由 CI 从源码编译
 4. 禁止自动发布 Release；仅生成源码、CI 脚本，人工确认后再发布

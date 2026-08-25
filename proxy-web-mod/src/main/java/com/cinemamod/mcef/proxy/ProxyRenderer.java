@@ -1,6 +1,7 @@
 package com.cinemamod.mcef.proxy;
 
 import com.mojang.blaze3d.systems.RenderSystem;
+import org.lwjgl.system.MemoryUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,6 +18,11 @@ import static org.lwjgl.opengl.GL30.*;
  *   - ProxyRenderer 使用 GL_RGBA + GL_UNSIGNED_BYTE（OpenGL ES 兼容）
  *
  * 截图服务返回 RGBA 格式数据，无需字节序转换。
+ *
+ * 关键实现细节：
+ *   - LWJGL 的 glTexImage2D / glTexSubImage2D 要求直接缓冲区 (direct buffer)，
+ *     不能使用 ByteBuffer.wrap() 包装的堆缓冲区，否则会抛出 IllegalArgumentException
+ *     或在 native 层段错误。使用 MemoryUtil.memAlloc() 分配直接缓冲区。
  *
  * 许可证：LGPL-2.1-or-later
  */
@@ -47,10 +53,11 @@ public class ProxyRenderer {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-        // 初始化为透明纹理
-        ByteBuffer empty = ByteBuffer.allocateDirect(width * height * 4);
+        // 初始化为透明纹理（使用直接缓冲区）
+        ByteBuffer empty = MemoryUtil.memAlloc(width * height * 4);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0,
                 GL_RGBA, GL_UNSIGNED_BYTE, empty);
+        MemoryUtil.memFree(empty);
 
         LOGGER.info("纹理初始化完成: id={}, {}x{}", textureID[0], width, height);
     }
@@ -69,21 +76,26 @@ public class ProxyRenderer {
             return;
         }
 
+        // LWJGL 要求直接缓冲区传递给 OpenGL
+        ByteBuffer buffer = MemoryUtil.memAlloc(rgbaData.length);
+        buffer.put(rgbaData);
+        buffer.flip();
+
         if (width != currentWidth || height != currentHeight) {
             // 尺寸变化，重新分配纹理
             currentWidth = width;
             currentHeight = height;
             glBindTexture(GL_TEXTURE_2D, textureID[0]);
-            ByteBuffer buffer = ByteBuffer.wrap(rgbaData);
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0,
                     GL_RGBA, GL_UNSIGNED_BYTE, buffer);
         } else {
             // 尺寸不变，使用 glTexSubImage2D 更新
             glBindTexture(GL_TEXTURE_2D, textureID[0]);
-            ByteBuffer buffer = ByteBuffer.wrap(rgbaData);
             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
                     GL_RGBA, GL_UNSIGNED_BYTE, buffer);
         }
+
+        MemoryUtil.memFree(buffer);
     }
 
     /**
@@ -100,9 +112,10 @@ public class ProxyRenderer {
         currentHeight = height;
 
         glBindTexture(GL_TEXTURE_2D, textureID[0]);
-        ByteBuffer empty = ByteBuffer.allocateDirect(width * height * 4);
+        ByteBuffer empty = MemoryUtil.memAlloc(width * height * 4);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0,
                 GL_RGBA, GL_UNSIGNED_BYTE, empty);
+        MemoryUtil.memFree(empty);
 
         LOGGER.info("纹理尺寸调整: {}x{}", width, height);
     }

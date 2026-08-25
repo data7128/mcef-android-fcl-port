@@ -1,5 +1,7 @@
 # .github/workflows/build-proxy-web-mod.yml
-name: Build Proxy Web Mod
+# 路线2（推荐优先）：代理截图模组
+# 不依赖任何 CEF native 库，纯 Fabric mod，FCL 可直接运行
+name: Build Proxy Web Mod (Route 2)
 
 on:
   workflow_dispatch:
@@ -7,6 +9,9 @@ on:
     paths:
       - 'proxy-web-mod/**'
       - '.github/workflows/build-proxy-web-mod.yml'
+  pull_request:
+    paths:
+      - 'proxy-web-mod/**'
 
 jobs:
   build:

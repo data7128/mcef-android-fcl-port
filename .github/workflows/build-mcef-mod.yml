@@ -1,5 +1,9 @@
 # .github/workflows/build-mcef-mod.yml
-name: Build MCEF Android Mod
+# 路线1：MCEF 模组构建（克隆上游 CinemaMod/mcef）
+#
+# 注意：MCEF 上游明确声明 "This mod will not work on Android"
+# 此 CI 仅验证上游代码能否编译通过，不保证在 Android FCL 上可运行
+name: Build MCEF Android Mod (Route 1)
 
 on:
   workflow_dispatch:
@@ -21,7 +25,7 @@ jobs:
         run: |
           if [ ! -f "mcef-android/build.gradle" ] && [ ! -f "mcef-android/settings.gradle" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "::notice::mcef-android 目录尚无构建文件，将尝试克隆上游 MCEF 源码"
+            echo "::notice::mcef-android 目录尚无构建文件，将克隆上游 MCEF 源码"
           else
             echo "skip=false" >> $GITHUB_OUTPUT
           fi

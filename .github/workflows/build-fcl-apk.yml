@@ -1,11 +1,18 @@
 # .github/workflows/build-fcl-apk.yml
-name: Build FCL APK (with CEF)
+# 路线1：FCL APK 构建（需 Fork FoldCraftLauncher 并集成 CEF .so）
+#
+# 前提条件：
+#   1. 已 Fork https://github.com/FCL-Team/FoldCraftLauncher 到你的 GitHub
+#   2. Fork 仓库有 feature/dev-cef-android 分支
+#   3. 已通过 build-cef-android 工作流产出 libcef.so artifact
+#   4. FCL 源码已集成 WebViewScreenshotService（从 fcl-patches/ 复制）
+name: Build FCL APK (with CEF) — Route 1
 
 on:
   workflow_dispatch:
     inputs:
       libcef-artifact:
-        description: 'libcef artifact name'
+        description: 'libcef artifact 名称（来自 build-cef-android 工作流）'
         required: true
         default: 'libcef-arm64'
 
@@ -24,7 +31,9 @@ jobs:
         id: check
         run: |
           if [ ! -f "build.gradle" ] && [ ! -f "settings.gradle" ] && [ ! -f "FCL/build.gradle" ]; then
-            echo "::error::FoldCraftLauncher 仓库尚无构建文件，请先 Fork 并配置 FCL 源码"
+            echo "::error::FoldCraftLauncher 仓库尚无构建文件"
+            echo "::error::请先 Fork https://github.com/FCL-Team/FoldCraftLauncher"
+            echo "::error::并创建 feature/dev-cef-android 分支"
             echo "skip=true" >> $GITHUB_OUTPUT
             exit 0
           fi

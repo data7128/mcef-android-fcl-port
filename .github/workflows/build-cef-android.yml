@@ -1,22 +1,70 @@
 # .github/workflows/build-cef-android.yml
-name: Build CEF Android (arm64-v8a)
+# 路线1：原生 CEF 移植
+#
+# ============================================================
+# 警告：此工作流在免费 GitHub Actions runner 上几乎必定失败
+# ============================================================
+#
+# 原因：
+#   1. Chromium 源码需要 100GB+ 磁盘空间，免费 runner 仅 14GB SSD
+#   2. 编译需要 32GB+ RAM，免费 runner 仅 16GB
+#   3. 完整编译耗时 6+ 小时，超过 Actions 超时限制
+#   4. 官方 CEF 不提供 Android 预编译包，必须从 Chromium 源码编译
+#
+# 可行方案：
+#   1. 使用 GitHub 付费 larger runner（32+ cores, 64GB+ RAM）
+#   2. 自建编译服务器（Linux x86_64, 64GB RAM, 200GB SSD）
+#   3. 使用 Google Cloud Build 或 AWS CodeBuild 按量付费
+#   4. 寻找第三方预编译的 Android Chromium .so（不保证兼容性）
+#
+# 此工作流仅在手动触发时运行（workflow_dispatch），不会自动触发
+name: Build CEF Android (arm64-v8a) — Route 1
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/build-cef-android.yml'
+    inputs:
+      runner_type:
+        description: 'Runner 类型（免费 runner 大概率 OOM）'
+        required: true
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - ubuntu-latest-32-cores
 
 jobs:
   build-cef:
-    runs-on: ubuntu-latest
-    # 警告：标准 runner (16GB RAM / 14GB SSD) 大概率 OOM
-    # 生产环境建议改为 larger runner:
-    # runs-on: ubuntu-latest-32-cores
+    runs-on: ${{ inputs.runner_type }}
+    timeout-minutes: 360
 
     steps:
+      - name: ⚠️ 检查 runner 规格
+        run: |
+          echo "### CEF Android 构建警告 ###"
+          echo ""
+          echo "当前 runner: ${{ inputs.runner_type }}"
+          echo ""
+          if [ "${{ inputs.runner_type }}" = "ubuntu-latest" ]; then
+            echo "::warning::免费 runner (16GB RAM / 14GB SSD) 几乎必定 OOM"
+            echo "::warning::Chromium 编译需要 32GB+ RAM 和 100GB+ 磁盘"
+            echo "::warning::建议使用 ubuntu-latest-32-cores 或自建编译服务器"
+          fi
+          echo ""
+          echo "CEF 不提供 Android 预编译包，必须从 Chromium 源码编译"
+          echo "预计编译时间: 4-8 小时（32-core runner）"
+
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Check available disk space
+        run: |
+          echo "可用磁盘空间:"
+          df -h /
+          echo ""
+          echo "可用内存:"
+          free -h
+          echo ""
+          echo "如果磁盘空间不足 100GB，构建将在 fetch 阶段失败"
 
       - name: Install depot_tools
         run: |
@@ -43,9 +91,8 @@ jobs:
         run: |
           cd chromium/src
           autoninja -C out/Release-arm64 content_shell_apk
-          # 预期耗时: 6+ 小时，极可能 OOM
 
-      - name: Extract libcef.so
+      - name: Extract native libraries
         run: |
           mkdir -p artifact/arm64-v8a
           cp out/Release-arm64/apks/*.apk /tmp/extract/
