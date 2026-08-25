@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "proxy-web-mod:block/web_screen" },
+    "facing=south": { "model": "proxy-web-mod:block/web_screen", "y": 180 },
+    "facing=east": { "model": "proxy-web-mod:block/web_screen", "y": 90 },
+    "facing=west": { "model": "proxy-web-mod:block/web_screen", "y": 270 }
+  }
+}

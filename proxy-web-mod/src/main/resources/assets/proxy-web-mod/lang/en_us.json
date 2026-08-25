@@ -1,0 +1,12 @@
+{
+  "block.proxy-web-mod.web_screen": "Web Screen",
+  "proxy-web-mod.gui.title": "Web Screen Settings",
+  "proxy-web-mod.gui.url": "URL",
+  "proxy-web-mod.gui.width": "Width",
+  "proxy-web-mod.gui.height": "Height",
+  "proxy-web-mod.gui.interval": "Interval(s)",
+  "proxy-web-mod.gui.save": "Save",
+  "proxy-web-mod.gui.cancel": "Cancel",
+  "proxy-web-mod.gui.clear_url": "Clear URL",
+  "proxy-web-mod.gui.error": "Error"
+}

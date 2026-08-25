@@ -1,6 +1,6 @@
 # .github/workflows/build-proxy-web-mod.yml
 # 路线2（推荐优先）：代理截图模组
-# 不依赖任何 CEF native 库，纯 Fabric mod，FCL 可直接运行
+# 纯 Fabric Java 代码，不依赖 CEF/native 库，FCL 可直接加载
 name: Build Proxy Web Mod (Route 2)
 
 on:
@@ -40,11 +40,11 @@ jobs:
         working-directory: proxy-web-mod
         run: ./gradlew build --stacktrace
 
-      - name: Upload JAR
+      - name: Upload mod JAR
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: proxy-web-mod
+          name: proxy-web-mod-jar
           path: proxy-web-mod/build/libs/*.jar
           retention-days: 30
           if-no-files-found: warn

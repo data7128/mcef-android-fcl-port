@@ -1,38 +1,46 @@
 // proxy-web-mod/build.gradle
 // 代理式轻量替代模组 — 不依赖 CEF native 库
+// 纯 Fabric Java 代码，FCL 可直接加载
 
 plugins {
-    id 'fabric-loom' version '1.5-SNAPSHOT'
+    id 'fabric-loom' version '1.7-SNAPSHOT'
     id 'maven-publish'
 }
 
-version = "1.0.0"
+version = "2.0.0"
 group = "com.cinemamod.mcef.proxy"
-
-dependencies {
-    // Minecraft 1.20.1 Fabric
-    minecraft "com.mojang:minecraft:1.20.1"
-    mappings "net.fabricmc:yarn:1.20.1+build.10:v2"
-    modImplementation "net.fabricmc:fabric-loader:0.15.7"
-    modImplementation "net.fabricmc.fabric-api:fabric-api:0.91.0+1.20.1"
-}
 
 base {
     archivesName = "proxy-web-mod"
 }
 
+repositories {
+    maven { url = "https://maven.fabricmc.net" }
+    mavenCentral()
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:1.20.1"
+    mappings "net.fabricmc:yarn:1.20.1+build.10:v2"
+    modImplementation "net.fabricmc:fabric-loader:0.15.11"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:0.92.2+1.20.1"
+}
+
 processResources {
     inputs.property "version", project.version
-
     filesMatching("fabric.mod.json") {
         expand "version": project.version
     }
 }
 
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 17
+}
+
 java {
+    withSourcesJar()
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
-    withSourcesJar()
 }
 
 jar {

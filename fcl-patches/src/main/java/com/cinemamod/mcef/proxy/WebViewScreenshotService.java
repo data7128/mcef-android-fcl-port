@@ -15,17 +15,26 @@ import com.sun.net.httpserver.HttpServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
- * FCL 内置 WebView 截图服务。
+ * FCL 内置 WebView 截图服务 v2。
  *
- * 此类运行在 FCL 的 Android App 进程中，监听 localhost:28085，
- * 接收截图请求，使用 Android 系统 WebView 加载网页并截取 Bitmap。
+ * 监听 localhost:28085，接收截图请求，返回 PNG 图片。
+ *
+ * API:
+ *   GET  /health                → 200 OK
+ *   GET  /screenshot?url=...&width=W&height=H → image/png
+ *   POST /screenshot (JSON)      → image/png (向后兼容)
  *
  * === 关键限制 ===
  *
@@ -45,10 +54,6 @@ import java.util.concurrent.TimeUnit;
  *    此类需要在 FCL 启动器源码中集成（在 JVMActivity.onCreate 中启动），
  *    不属于纯 Fabric mod 部分。放在本仓库中作为参考实现和 FCL 补丁的源文件。
  *
- * API:
- *   GET  /health       → 200 OK
- *   POST /screenshot   → {"url":"...","width":W,"height":H} → RGBA bytes
- *
  * 许可证：LGPL-2.1-or-later
  */
 public class WebViewScreenshotService {
@@ -61,12 +66,11 @@ public class WebViewScreenshotService {
     private WebView webView;
 
     public WebViewScreenshotService(Context context) {
-        // 接受 Application Context 或 Activity Context
         this.context = context.getApplicationContext();
     }
 
     public void start() throws IOException {
-        // 在主线程创建 WebView（使用 Handler 而非 Activity.runOnUiThread）
+        // 在主线程创建 WebView
         mainHandler.post(() -> {
             try {
                 webView = new WebView(context);
@@ -76,8 +80,6 @@ public class WebViewScreenshotService {
                 LOGGER.info("WebView 创建成功");
             } catch (Exception e) {
                 LOGGER.error("WebView 创建失败（可能是 Application Context 限制）: {}", e.getMessage());
-                // 此崩溃预期在 FCL 环境下发生
-                // 如果失败，截图服务将返回占位纹理
             }
         });
 
@@ -108,12 +110,12 @@ public class WebViewScreenshotService {
     }
 
     /**
-     * 截取指定 URL 的网页为 RGBA 字节数组。
+     * 截取指定 URL 的网页为 PNG 字节数组。
      */
     public byte[] captureScreenshot(String url, int width, int height) {
         if (webView == null) {
-            LOGGER.warn("WebView 未初始化，返回占位纹理");
-            return generatePlaceholder(width, height);
+            LOGGER.warn("WebView 未初始化，返回 null");
+            return null;
         }
 
         final CountDownLatch latch = new CountDownLatch(1);
@@ -127,13 +129,22 @@ public class WebViewScreenshotService {
                     @Override
                     public void onPageFinished(WebView view, String finishedUrl) {
                         try {
+                            // 延迟 500ms 等待渲染完成
+                            Thread.sleep(500);
+
                             Bitmap bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
                             Canvas canvas = new Canvas(bmp);
+                            canvas.drawColor(android.graphics.Color.WHITE);
                             view.draw(canvas);
-                            result[0] = bitmapToRGBA(bmp);
+
+                            // 转为 PNG
+                            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                            bmp.compress(Bitmap.CompressFormat.PNG, 90, baos);
+                            result[0] = baos.toByteArray();
+                            baos.close();
+                            bmp.recycle();
                         } catch (Exception e) {
                             LOGGER.warn("截图绘制失败: {}", e.getMessage());
-                            result[0] = generatePlaceholder(width, height);
                         }
                         latch.countDown();
                     }
@@ -142,7 +153,6 @@ public class WebViewScreenshotService {
                     public void onReceivedError(WebView view, int errorCode,
                                                 String description, String failingUrl) {
                         LOGGER.warn("WebView 加载错误: {} (code={})", description, errorCode);
-                        result[0] = generatePlaceholder(width, height);
                         latch.countDown();
                     }
                 });
@@ -150,7 +160,6 @@ public class WebViewScreenshotService {
                 webView.loadUrl(url);
             } catch (Exception e) {
                 LOGGER.error("截图请求异常: {}", e.getMessage());
-                result[0] = generatePlaceholder(width, height);
                 latch.countDown();
             }
         });
@@ -159,47 +168,14 @@ public class WebViewScreenshotService {
         try {
             if (!latch.await(10, TimeUnit.SECONDS)) {
                 LOGGER.warn("截图超时: url={}", url);
-                return generatePlaceholder(width, height);
+                return null;
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return generatePlaceholder(width, height);
+            return null;
         }
 
-        return result[0] != null ? result[0] : generatePlaceholder(width, height);
-    }
-
-    /**
-     * 将 Bitmap 转为 RGBA 字节数组。
-     * Android Bitmap.Config.ARGB_8888 的内存布局为 RGBA（小端序）。
-     */
-    private byte[] bitmapToRGBA(Bitmap bmp) {
-        int w = bmp.getWidth();
-        int h = bmp.getHeight();
-        int[] pixels = new int[w * h];
-        bmp.getPixels(pixels, 0, w, 0, 0, w, h);
-
-        byte[] rgba = new byte[w * h * 4];
-        for (int i = 0; i < pixels.length; i++) {
-            int pixel = pixels[i];
-            // Android int 像素格式: 0xAARRGGBB
-            rgba[i * 4]     = (byte) ((pixel >> 16) & 0xFF); // R
-            rgba[i * 4 + 1] = (byte) ((pixel >> 8) & 0xFF);  // G
-            rgba[i * 4 + 2] = (byte) (pixel & 0xFF);         // B
-            rgba[i * 4 + 3] = (byte) ((pixel >> 24) & 0xFF); // A
-        }
-        return rgba;
-    }
-
-    private byte[] generatePlaceholder(int width, int height) {
-        byte[] data = new byte[width * height * 4];
-        for (int i = 0; i < width * height; i++) {
-            data[i * 4] = 0x33;
-            data[i * 4 + 1] = 0x33;
-            data[i * 4 + 2] = 0x33;
-            data[i * 4 + 3] = (byte) 0xFF;
-        }
-        return data;
+        return result[0];
     }
 
     // ===== HTTP Handlers =====
@@ -208,6 +184,7 @@ public class WebViewScreenshotService {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             String response = "OK";
+            exchange.getResponseHeaders().set("Content-Type", "text/plain");
             exchange.sendResponseHeaders(200, response.length());
             try (OutputStream os = exchange.getResponseBody()) {
                 os.write(response.getBytes());
@@ -218,37 +195,72 @@ public class WebViewScreenshotService {
     class ScreenshotHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
-            if (!"POST".equals(exchange.getRequestMethod())) {
+            if (!"GET".equals(exchange.getRequestMethod())
+                    && !"POST".equals(exchange.getRequestMethod())) {
                 exchange.sendResponseHeaders(405, -1);
                 return;
             }
 
-            // 解析请求体
-            byte[] body = exchange.getRequestBody().readAllBytes();
-            String json = new String(body);
+            String url;
+            int width, height;
 
-            // 简单 JSON 解析（避免引入额外依赖）
-            String url = extractJsonField(json, "url");
-            int width = Integer.parseInt(extractJsonField(json, "width"));
-            int height = Integer.parseInt(extractJsonField(json, "height"));
+            if ("GET".equals(exchange.getRequestMethod())) {
+                // GET /screenshot?url=...&width=512&height=512
+                Map<String, String> params = parseQueryParams(exchange.getRequestURI().getQuery());
+                url = params.getOrDefault("url", "");
+                width = Integer.parseInt(params.getOrDefault("width", "512"));
+                height = Integer.parseInt(params.getOrDefault("height", "512"));
+            } else {
+                // POST /screenshot (JSON body, 向后兼容)
+                byte[] body = exchange.getRequestBody().readAllBytes();
+                String json = new String(body, StandardCharsets.UTF_8);
+                url = extractJsonField(json, "url");
+                width = Integer.parseInt(extractJsonField(json, "width"));
+                height = Integer.parseInt(extractJsonField(json, "height"));
+            }
+
+            // 限制最大尺寸
+            width = Math.min(width, 1920);
+            height = Math.min(height, 1080);
 
             // 截图
-            byte[] rgba = captureScreenshot(url, width, height);
+            byte[] png = captureScreenshot(url, width, height);
 
-            // 返回 RGBA 数据
-            exchange.getResponseHeaders().set("Content-Type", "application/octet-stream");
-            exchange.sendResponseHeaders(200, rgba.length);
-            try (OutputStream os = exchange.getResponseBody()) {
-                os.write(rgba);
+            if (png != null) {
+                // 返回 PNG 数据
+                exchange.getResponseHeaders().set("Content-Type", "image/png");
+                exchange.sendResponseHeaders(200, png.length);
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(png);
+                }
+            } else {
+                // 截图失败
+                byte[] error = "Screenshot failed".getBytes();
+                exchange.getResponseHeaders().set("Content-Type", "text/plain");
+                exchange.sendResponseHeaders(503, error.length);
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(error);
+                }
             }
         }
 
+        private Map<String, String> parseQueryParams(String query) {
+            Map<String, String> params = new HashMap<>();
+            if (query == null || query.isEmpty()) return params;
+
+            for (String pair : query.split("&")) {
+                String[] kv = pair.split("=", 2);
+                if (kv.length == 2) {
+                    params.put(kv[0], URLDecoder.decode(kv[1], StandardCharsets.UTF_8));
+                }
+            }
+            return params;
+        }
+
         private String extractJsonField(String json, String field) {
-            // 非常简单的 JSON 字段提取
             String search = "\"" + field + "\":\"";
             int start = json.indexOf(search);
             if (start < 0) {
-                // 尝试数字格式
                 search = "\"" + field + "\":";
                 start = json.indexOf(search);
                 if (start < 0) return "";

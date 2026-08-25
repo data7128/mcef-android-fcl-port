@@ -1,107 +1,43 @@
 # .github/workflows/build-cef-android.yml
-# 路线1：原生 CEF 移植
-#
 # ============================================================
-# 警告：此工作流在免费 GitHub Actions runner 上几乎必定失败
+# 此工作流已禁用 — 不在 GitHub Actions 编译完整 CEF/Chromium
 # ============================================================
 #
-# 原因：
-#   1. Chromium 源码需要 100GB+ 磁盘空间，免费 runner 仅 14GB SSD
-#   2. 编译需要 32GB+ RAM，免费 runner 仅 16GB
-#   3. 完整编译耗时 6+ 小时，超过 Actions 超时限制
-#   4. 官方 CEF 不提供 Android 预编译包，必须从 Chromium 源码编译
+# 失败原因（2026-08-25 验证）：
+#   1. 磁盘空间不足：Chromium 源码需要 100GB+，免费 runner 仅 14GB SSD
+#      → 在 gclient sync 阶段报错: OSError: [Errno 28] No space left on device
+#   2. 内存不足：编译需要 32GB+ RAM，免费 runner 仅 16GB
+#      → 编译阶段必定 OOM (Out of Memory)
+#   3. 超时限制：完整编译需 6+ 小时，超过 Actions 6 小时超时
+#   4. GitHub 付费 larger runner (32-core, 64GB) 单次费用约 $40-50
+#      且编译出的 libcef.so 还面临 Activity 依赖、子进程模型等不可绕过的技术死胡同
 #
-# 可行方案：
-#   1. 使用 GitHub 付费 larger runner（32+ cores, 64GB+ RAM）
-#   2. 自建编译服务器（Linux x86_64, 64GB RAM, 200GB SSD）
-#   3. 使用 Google Cloud Build 或 AWS CodeBuild 按量付费
-#   4. 寻找第三方预编译的 Android Chromium .so（不保证兼容性）
+# 结论：原生 CEF 移植在普通手机 FCL 上几乎不可实现。
+# 完整分析见 docs/CEF-PORT-FEASIBILITY.md
 #
-# 此工作流仅在手动触发时运行（workflow_dispatch），不会自动触发
-name: Build CEF Android (arm64-v8a) — Route 1
+# 如需自行编译 CEF，请使用自建大内存 Linux 服务器（64GB RAM, 200GB SSD）。
+#
+# 此文件保留为参考，不执行任何 job。
+# 要重新启用：取消下方 job 的注释并移除 `if: false`
+name: Build CEF Android (DISABLED)
 
 on:
   workflow_dispatch:
     inputs:
-      runner_type:
-        description: 'Runner 类型（免费 runner 大概率 OOM）'
+      reason:
+        description: '确认：此构建在免费 runner 上必定失败'
         required: true
-        default: 'ubuntu-latest'
-        type: choice
-        options:
-          - ubuntu-latest
-          - ubuntu-latest-32-cores
+        default: '我已阅读文档，知道会失败'
 
 jobs:
   build-cef:
-    runs-on: ${{ inputs.runner_type }}
-    timeout-minutes: 360
-
+    if: false  # 永远不执行
+    runs-on: ubuntu-latest
     steps:
-      - name: ⚠️ 检查 runner 规格
+      - name: 此 Job 已禁用
         run: |
-          echo "### CEF Android 构建警告 ###"
-          echo ""
-          echo "当前 runner: ${{ inputs.runner_type }}"
-          echo ""
-          if [ "${{ inputs.runner_type }}" = "ubuntu-latest" ]; then
-            echo "::warning::免费 runner (16GB RAM / 14GB SSD) 几乎必定 OOM"
-            echo "::warning::Chromium 编译需要 32GB+ RAM 和 100GB+ 磁盘"
-            echo "::warning::建议使用 ubuntu-latest-32-cores 或自建编译服务器"
-          fi
-          echo ""
-          echo "CEF 不提供 Android 预编译包，必须从 Chromium 源码编译"
-          echo "预计编译时间: 4-8 小时（32-core runner）"
-
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Check available disk space
-        run: |
-          echo "可用磁盘空间:"
-          df -h /
-          echo ""
-          echo "可用内存:"
-          free -h
-          echo ""
-          echo "如果磁盘空间不足 100GB，构建将在 fetch 阶段失败"
-
-      - name: Install depot_tools
-        run: |
-          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
-          echo "$PWD/depot_tools" >> $GITHUB_PATH
-
-      - name: Fetch Chromium Android source
-        run: |
-          mkdir chromium && cd chromium
-          fetch --nohooks android
-          gclient sync --no-history --shallow
-
-      - name: Configure Android arm64 build
-        run: |
-          cd chromium/src
-          gn gen out/Release-arm64 --args='
-            target_os="android"
-            target_cpu="arm64"
-            is_debug=false
-            is_official_build=true
-          '
-
-      - name: Build content shell
-        run: |
-          cd chromium/src
-          autoninja -C out/Release-arm64 content_shell_apk
-
-      - name: Extract native libraries
-        run: |
-          mkdir -p artifact/arm64-v8a
-          cp out/Release-arm64/apks/*.apk /tmp/extract/
-          cd /tmp/extract && unzip *.apk "lib/arm64-v8a/*"
-          cp lib/arm64-v8a/*.so artifact/arm64-v8a/
-
-      - name: Upload libcef artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: libcef-arm64
-          path: artifact/
-          retention-days: 30
+          echo "此工作流已禁用。"
+          echo "原因：GitHub 免费 runner 无法编译 Chromium（磁盘/内存/超时限制）"
+          echo "如需编译 CEF，请使用自建大内存 Linux 服务器（64GB RAM, 200GB SSD）"
+          echo "完整分析见 docs/CEF-PORT-FEASIBILITY.md"
+          exit 1

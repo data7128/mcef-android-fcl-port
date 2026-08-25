@@ -3,7 +3,7 @@
   "id": "proxy-web-mod",
   "version": "${version}",
   "name": "Proxy Web Mod",
-  "description": "代理式轻量替代模组 — 通过 Android WebView 截图替代 CEF 离屏渲染，不依赖任何 native 库",
+  "description": "网页截图代理模组 — 自定义方块显示网页截图，纯 Fabric Java 代码，不依赖 CEF/native 库，FCL 可直接加载",
   "authors": [
     "mcef-android-fcl-port"
   ],
@@ -16,13 +16,16 @@
   "entrypoints": {
     "main": [
       "com.cinemamod.mcef.proxy.ProxyWebMod"
+    ],
+    "client": [
+      "com.cinemamod.mcef.proxy.ProxyWebModClient"
     ]
   },
   "depends": {
     "fabricloader": ">=0.15.7",
     "minecraft": "~1.20.1",
     "java": ">=17",
-    "fabric-api": "*"
+    "fabric-api": ">=0.92.0"
   },
   "suggests": {
     "mcef": "*"

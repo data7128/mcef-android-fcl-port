@@ -1,0 +1,12 @@
+{
+  "block.proxy-web-mod.web_screen": "网页显示方块",
+  "proxy-web-mod.gui.title": "网页显示设置",
+  "proxy-web-mod.gui.url": "网址",
+  "proxy-web-mod.gui.width": "宽",
+  "proxy-web-mod.gui.height": "高",
+  "proxy-web-mod.gui.interval": "间隔(秒)",
+  "proxy-web-mod.gui.save": "保存",
+  "proxy-web-mod.gui.cancel": "取消",
+  "proxy-web-mod.gui.clear_url": "清除网址",
+  "proxy-web-mod.gui.error": "错误"
+}
