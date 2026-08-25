@@ -5,7 +5,6 @@ import net.fabricmc.fabric.api.itemgroup.v1.ItemGroupEvents;
 import net.fabricmc.fabric.api.object.builder.v1.block.FabricBlockSettings;
 import net.minecraft.block.Block;
 import net.minecraft.block.MapColor;
-import net.minecraft.block.Material;
 import net.minecraft.block.entity.BlockEntityType;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
@@ -48,7 +47,8 @@ public class ProxyWebMod implements ModInitializer {
         WEB_SCREEN_BLOCK = Registry.register(
                 Registries.BLOCK,
                 new Identifier(MOD_ID, "web_screen"),
-                new WebScreenBlock(FabricBlockSettings.of(Material.STONE, MapColor.BLACK)
+                new WebScreenBlock(FabricBlockSettings.create()
+                        .mapColor(MapColor.BLACK)
                         .strength(3.5f)
                         .sounds(BlockSoundGroup.STONE))
         );
