@@ -30,11 +30,11 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
-          gradle-version: '8.5'
+          gradle-version: '8.8'
 
       - name: Generate Gradle Wrapper
         working-directory: proxy-web-mod
-        run: gradle wrapper --gradle-version 8.5 --distribution-type bin
+        run: gradle wrapper --gradle-version 8.8 --distribution-type bin
 
       - name: Build mod
         working-directory: proxy-web-mod
