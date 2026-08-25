@@ -29,14 +29,15 @@ jobs:
       - name: Clone MCEF upstream (if needed)
         if: steps.check-src.outputs.skip == 'true'
         run: |
-          echo "::notice::正在克隆上游 MCEF 源码..."
-          git clone --depth 1 https://github.com/Cinemamod/MCEF.git mcef-android-src || {
-            echo "::error::无法克隆上游 MCEF 仓库，请手动添加源码到 mcef-android/ 目录"
+          echo "::notice::正在克隆上游 MCEF 源码（含 java-cef 子模块）..."
+          rm -rf mcef-android
+          git clone --depth 1 https://github.com/CinemaMod/mcef.git mcef-android || {
+            echo "::error::无法克隆上游 MCEF 仓库"
             exit 1
           }
-          rm -rf mcef-android/.gitkeep
-          cp -r mcef-android-src/* mcef-android/ || true
-          rm -rf mcef-android-src
+          cd mcef-android
+          # 初始化 java-cef 子模块（cloneJcef 任务依赖此操作）
+          git submodule update --init --recursive --depth 1
 
       - name: Setup JDK 21
         uses: actions/setup-java@v4
@@ -55,10 +56,6 @@ jobs:
           if [ ! -f "gradlew" ]; then
             gradle wrapper --gradle-version 8.12 --distribution-type bin
           fi
-
-      - name: Clone java-cef bindings
-        working-directory: mcef-android
-        run: ./gradlew cloneJcef --stacktrace || true
 
       - name: Build Fabric mod
         working-directory: mcef-android
