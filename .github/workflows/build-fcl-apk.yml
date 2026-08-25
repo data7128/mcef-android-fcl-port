@@ -1,0 +1,53 @@
+# .github/workflows/build-fcl-apk.yml
+name: Build FCL APK (with CEF)
+
+on:
+  workflow_dispatch:
+    inputs:
+      libcef-artifact:
+        description: 'libcef artifact name'
+        required: true
+        default: 'libcef-arm64'
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout FCL fork
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/FoldCraftLauncher
+          ref: feature/dev-cef-android
+
+      - name: Download libcef artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.libcef-artifact }}
+          path: FCL/src/main/jniLibs/
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup NDK
+        uses: nttid/setup-ndk@v1
+        with:
+          ndk-version: r26b
+
+      - name: Build FCL APK (arm64 only)
+        run: ./gradlew :FCL:assembleRelease
+        env:
+          ORG_GRADLE_PROJECT_arch: arm64
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: fcl-cef-arm64-apk
+          path: FCL/build/outputs/apk/**/*.apk
+          retention-days: 30
