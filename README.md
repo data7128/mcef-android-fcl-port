@@ -209,8 +209,8 @@ GitHub Actions 工作流 `build-proxy-web-mod.yml` 会在以下情况自动触�
 ### 路线 1：MCEF 模组构建（仅验证编译）
 
 #### 前置条件
-- JDK 21+
-- Gradle 8.12+
+- JDK 17+
+- Gradle 8.8+（fabric-loom 1.7.1 不兼容过新的 Gradle，勿用 8.12）
 
 #### 构建命令
 
@@ -220,7 +220,7 @@ CI 会自动克隆上游 CinemaMod/mcef 并编译。本地构建需手动克隆�
 git clone --depth 1 https://github.com/CinemaMod/mcef.git mcef-android
 cd mcef-android
 git submodule update --init --recursive --depth 1
-gradle wrapper --gradle-version 8.12 --distribution-type bin
+gradle wrapper --gradle-version 8.8 --distribution-type bin
 ./gradlew build
 ```
 
