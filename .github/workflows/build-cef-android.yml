@@ -173,7 +173,7 @@ jobs:
           find . -name "*.ipdb" -delete
           df -h
 
-      - name: Generate ninja files (FCL: no-sandbox, no-zygote, OSR, VirGL)
+      - name: "Generate ninja files (FCL: no-sandbox, no-zygote, OSR, VirGL)"
         working-directory: cef
         env:
           PATH: $PWD/../depot_tools:$PATH
