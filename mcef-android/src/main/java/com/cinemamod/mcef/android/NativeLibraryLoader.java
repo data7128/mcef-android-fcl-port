@@ -1,15 +1,13 @@
 package com.cinemamod.mcef.android;
 
-import android.content.Context;
-import android.util.Log;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Field;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * 原生库加载器 — 从 jar 资源中解压 .so 到沙箱目录，
@@ -30,10 +28,13 @@ import java.util.List;
  *   assets/mcef/native/arm64-v8a/libjawt.so
  *   ...
  *
+ * 兼容性说明：不直接依赖 android.* 类，Context 用 Object 类型，
+ * PC 环境 CI 也能编译通过。
+ *
  * 许可证：LGPL-2.1-or-later
  */
 public class NativeLibraryLoader {
-    private static final String TAG = "NativeLibraryLoader";
+    private static final Logger LOGGER = LoggerFactory.getLogger("NativeLibraryLoader");
 
     // jar 内 so 文件所在的资源路径前缀
     private static final String ASSET_PREFIX = "/assets/mcef/native/arm64-v8a/";
@@ -53,12 +54,12 @@ public class NativeLibraryLoader {
      * 2. 反射追加 java.library.path
      * 3. 依次 loadLibrary
      *
-     * @param ctx Android Context
+     * @param ctx Android Context（Object 类型，兼容 PC 编译）
      * @return 是否全部加载成功
      */
-    public static synchronized boolean loadAll(Context ctx) {
+    public static synchronized boolean loadAll(Object ctx) {
         if (sLoaded) {
-            Log.i(TAG, "原生库已加载，跳过");
+            LOGGER.info("原生库已加载，跳过");
             return true;
         }
 
@@ -70,15 +71,15 @@ public class NativeLibraryLoader {
                 libDir = McefAndroidPaths.getNativeLibsDir();
             }
 
-            Log.i(TAG, "原生库目录: " + libDir.getAbsolutePath());
+            LOGGER.info("原生库目录: {}", libDir.getAbsolutePath());
 
             // 1. 解压 so 文件
             int extracted = extractNativeLibs(libDir);
-            Log.i(TAG, "解压完成: " + extracted + " 个 so 文件");
+            LOGGER.info("解压完成: {} 个 so 文件", extracted);
 
             // 2. 追加 java.library.path
             addLibraryPath(libDir.getAbsolutePath());
-            Log.i(TAG, "已追加 java.library.path: " + libDir.getAbsolutePath());
+            LOGGER.info("已追加 java.library.path: {}", libDir.getAbsolutePath());
 
             // 3. 依次加载 so
             for (String libName : NATIVE_LIBS) {
@@ -86,21 +87,21 @@ public class NativeLibraryLoader {
                 if (libFile.exists()) {
                     try {
                         System.load(libFile.getAbsolutePath());
-                        Log.i(TAG, "已加载: " + libName);
+                        LOGGER.info("已加载: {}", libName);
                     } catch (UnsatisfiedLinkError e) {
-                        Log.e(TAG, "加载失败 " + libName + ": " + e.getMessage());
+                        LOGGER.error("加载失败 {}: {}", libName, e.getMessage());
                     }
                 } else {
-                    Log.w(TAG, "so 文件不存在: " + libName + " (如果是存根环境可忽略)");
+                    LOGGER.warn("so 文件不存在: {} (如果是存根环境可忽略)", libName);
                 }
             }
 
             sLoaded = true;
-            Log.i(TAG, "原生库加载流程完成");
+            LOGGER.info("原生库加载流程完成");
             return true;
 
         } catch (Exception e) {
-            Log.e(TAG, "原生库加载异常: " + e.getMessage(), e);
+            LOGGER.error("原生库加载异常: {}", e.getMessage(), e);
             return false;
         }
     }
@@ -118,7 +119,7 @@ public class NativeLibraryLoader {
 
             InputStream is = NativeLibraryLoader.class.getResourceAsStream(resourcePath);
             if (is == null) {
-                Log.d(TAG, "资源不存在: " + resourcePath + " (存根环境下正常)");
+                LOGGER.debug("资源不存在: {} (存根环境下正常)", resourcePath);
                 continue;
             }
 
@@ -127,7 +128,7 @@ public class NativeLibraryLoader {
                 if (targetFile.exists()) {
                     long size = is.available();
                     if (targetFile.length() == size) {
-                        Log.d(TAG, "跳过已有: " + libName);
+                        LOGGER.debug("跳过已有: {}", libName);
                         count++;
                         continue;
                     }
@@ -147,7 +148,7 @@ public class NativeLibraryLoader {
                 targetFile.setWritable(true, false);
                 targetFile.setExecutable(true, false);
 
-                Log.i(TAG, "已解压: " + libName + " (" + targetFile.length() + " bytes)");
+                LOGGER.info("已解压: {} ({} bytes)", libName, targetFile.length());
                 count++;
             } finally {
                 is.close();
@@ -182,10 +183,10 @@ public class NativeLibraryLoader {
             newPaths[paths.length] = pathToAdd;
             usrPathsField.set(null, newPaths);
 
-            Log.i(TAG, "java.library.path 已追加 (方案1): " + pathToAdd);
+            LOGGER.info("java.library.path 已追加 (方案1): {}", pathToAdd);
             return;
         } catch (NoSuchFieldException e) {
-            Log.d(TAG, "方案1失败，尝试方案2: " + e.getMessage());
+            LOGGER.debug("方案1失败，尝试方案2: {}", e.getMessage());
         }
 
         try {
@@ -205,10 +206,10 @@ public class NativeLibraryLoader {
             newPaths[paths.length] = pathToAdd;
             sysPathsField.set(null, newPaths);
 
-            Log.i(TAG, "java.library.path 已追加 (方案2): " + pathToAdd);
+            LOGGER.info("java.library.path 已追加 (方案2): {}", pathToAdd);
         } catch (NoSuchFieldException e) {
-            Log.w(TAG, "无法修改 java.library.path: " + e.getMessage());
-            Log.w(TAG, "降级：使用 System.load() 绝对路径方式加载");
+            LOGGER.warn("无法修改 java.library.path: {}", e.getMessage());
+            LOGGER.warn("降级：使用 System.load() 绝对路径方式加载");
             // 降级方案：loadAll 中已经用 System.load(绝对路径) 加载了
         }
     }
@@ -228,7 +229,7 @@ public class NativeLibraryLoader {
             System.loadLibrary(libName);
             return true;
         } catch (UnsatisfiedLinkError e) {
-            Log.e(TAG, "loadLibrary 失败: " + libName + " - " + e.getMessage());
+            LOGGER.error("loadLibrary 失败: {} - {}", libName, e.getMessage());
             return false;
         }
     }

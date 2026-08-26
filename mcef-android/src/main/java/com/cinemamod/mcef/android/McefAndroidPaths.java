@@ -1,7 +1,7 @@
 package com.cinemamod.mcef.android;
 
-import android.content.Context;
-import android.util.Log;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.lang.reflect.Field;
@@ -23,10 +23,14 @@ import java.util.Map;
  *
  * 使用方式：在 MCEF 初始化最早期调用 ensureDirs() + exportEnv()。
  *
+ * 兼容性说明：本类不直接依赖 android.* 类，
+ * Context 参数使用 Object 类型，实际运行时由 FCL 注入 Android Context。
+ * 这样 PC 环境 CI 也能编译通过。
+ *
  * 许可证：LGPL-2.1-or-later
  */
 public class McefAndroidPaths {
-    private static final String TAG = "McefAndroidPaths";
+    private static final Logger LOGGER = LoggerFactory.getLogger("McefAndroidPaths");
 
     private static File sSandboxRoot;      // /data/user/0/<pkg>/files
     private static File sHomeDir;          // /data/user/0/<pkg>/files/home/user
@@ -39,12 +43,23 @@ public class McefAndroidPaths {
     /**
      * 确保所有沙箱目录存在。
      * 必须在 MCEF 任何初始化之前调用。
+     *
+     * @param ctx Android Context（实际类型 android.content.Context，
+     *            这里用 Object 以兼容 PC 编译环境）
      */
-    public static synchronized void ensureDirs(Context ctx) {
+    public static synchronized void ensureDirs(Object ctx) {
         if (sInitialized) return;
 
-        sSandboxRoot = ctx.getFilesDir();
-        Log.i(TAG, "沙箱根目录: " + sSandboxRoot.getAbsolutePath());
+        // 尝试从 Context 获取 filesDir（Android 环境）
+        sSandboxRoot = getFilesDir(ctx);
+        if (sSandboxRoot == null) {
+            // PC 环境降级：用 user.home 下的临时目录
+            String home = System.getProperty("user.home", "/tmp");
+            sSandboxRoot = new File(home, ".mcef_android_sandbox");
+            LOGGER.warn("未检测到 Android Context，使用降级沙箱目录: {}", sSandboxRoot.getAbsolutePath());
+        }
+
+        LOGGER.info("沙箱根目录: {}", sSandboxRoot.getAbsolutePath());
 
         // 关键目录列表
         sHomeDir = new File(sSandboxRoot, "home/user");
@@ -68,14 +83,14 @@ public class McefAndroidPaths {
         }
 
         sInitialized = true;
-        Log.i(TAG, "沙箱目录初始化完成");
+        LOGGER.info("沙箱目录初始化完成");
     }
 
     /**
      * 导出环境变量，供 CEF native 库读取。
      * 包括：HOME, TMPDIR, CEF_CACHE_PATH, CEF_USER_DATA_PATH
      */
-    public static void exportEnv(Context ctx) {
+    public static void exportEnv(Object ctx) {
         if (!sInitialized) {
             throw new IllegalStateException("ensureDirs() 必须先调用");
         }
@@ -96,7 +111,7 @@ public class McefAndroidPaths {
         System.setProperty("mcef.tmp", sTmpDir.getAbsolutePath());
         System.setProperty("mcef.native_libs", sNativeLibsDir.getAbsolutePath());
 
-        Log.i(TAG, "环境变量已导出: HOME=" + sHomeDir.getAbsolutePath());
+        LOGGER.info("环境变量已导出: HOME={}", sHomeDir.getAbsolutePath());
     }
 
     /**
@@ -110,11 +125,11 @@ public class McefAndroidPaths {
      *   String pc_path = "/home/user/.config/cef/cache";
      *   String android_path = McefAndroidPaths.toSandboxPath(ctx, pc_path);
      *
-     * @param ctx Android Context
+     * @param ctx Android Context（Object 类型，兼容 PC 编译）
      * @param pcPath PC 风格绝对路径
      * @return Android 沙箱内的绝对路径
      */
-    public static String toSandboxPath(Context ctx, String pcPath) {
+    public static String toSandboxPath(Object ctx, String pcPath) {
         if (pcPath == null || pcPath.isEmpty()) {
             return pcPath;
         }
@@ -145,8 +160,28 @@ public class McefAndroidPaths {
             parent.mkdirs();
         }
 
-        Log.d(TAG, "路径映射: " + pcPath + " → " + mapped.getAbsolutePath());
+        LOGGER.debug("路径映射: {} → {}", pcPath, mapped.getAbsolutePath());
         return mapped.getAbsolutePath();
+    }
+
+    // ===== Android Context 反射工具 =====
+
+    /**
+     * 从 Context 对象获取 filesDir。
+     * 通过反射调用，避免直接依赖 android.* 类。
+     */
+    private static File getFilesDir(Object ctx) {
+        if (ctx == null) return null;
+        try {
+            java.lang.reflect.Method method = ctx.getClass().getMethod("getFilesDir");
+            Object result = method.invoke(ctx);
+            if (result instanceof File) {
+                return (File) result;
+            }
+        } catch (Exception e) {
+            LOGGER.debug("获取 filesDir 失败（非 Android 环境）: {}", e.getMessage());
+        }
+        return null;
     }
 
     // ===== 工具方法 =====
@@ -154,7 +189,7 @@ public class McefAndroidPaths {
     private static void mkdirs(File dir) {
         if (!dir.exists()) {
             boolean ok = dir.mkdirs();
-            Log.d(TAG, "创建目录 " + dir.getAbsolutePath() + ": " + (ok ? "成功" : "失败"));
+            LOGGER.debug("创建目录 {}: {}", dir.getAbsolutePath(), ok ? "成功" : "失败");
         }
     }
 
@@ -173,10 +208,10 @@ public class McefAndroidPaths {
             field.setAccessible(true);
             Map<String, String> writableEnv = (Map<String, String>) field.get(env);
             writableEnv.putAll(vars);
-            Log.i(TAG, "环境变量已通过反射设置 (方案1)");
+            LOGGER.info("环境变量已通过反射设置 (方案1)");
             return;
         } catch (Exception e) {
-            Log.d(TAG, "方案1失败，尝试方案2: " + e.getMessage());
+            LOGGER.debug("方案1失败，尝试方案2: {}", e.getMessage());
         }
 
         try {
@@ -192,9 +227,9 @@ public class McefAndroidPaths {
             mField.setAccessible(true);
             Map<String, String> writable = (Map<String, String>) mField.get(unmodifiableEnv);
             writable.putAll(vars);
-            Log.i(TAG, "环境变量已通过反射设置 (方案2)");
+            LOGGER.info("环境变量已通过反射设置 (方案2)");
         } catch (Exception e) {
-            Log.w(TAG, "无法通过反射设置环境变量: " + e.getMessage());
+            LOGGER.warn("无法通过反射设置环境变量: {}", e.getMessage());
             // 降级：native 侧通过 JNI 参数传入路径
         }
     }

@@ -1,7 +1,7 @@
 package com.cinemamod.mcef;
 
-import android.content.Context;
-import android.util.Log;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.cinemamod.mcef.android.McefAndroidPaths;
 
@@ -19,7 +19,7 @@ import com.cinemamod.mcef.android.McefAndroidPaths;
  *   MCEFRenderer               — OpenGL 纹理渲染
  *
  * Android 移植改动点：
- *   1. initialize() 增加 Context 参数
+ *   1. initialize() 增加 Context 参数（Object 类型，避免直接依赖 android.*）
  *   2. 所有文件路径通过 McefAndroidPaths.toSandboxPath() 转换
  *   3. 禁用 CEF 的沙盒进程（Android 不支持）
  *   4. 使用 OSR（离屏渲染）模式，配合 GL 纹理上传
@@ -27,33 +27,35 @@ import com.cinemamod.mcef.android.McefAndroidPaths;
  * 许可证：LGPL-2.1-or-later
  */
 public class MCEFBrowser {
-    private static final String TAG = "MCEFBrowser";
+    private static final Logger LOGGER = LoggerFactory.getLogger("MCEFBrowser");
 
     private static boolean sInitialized = false;
-    private static Context sAppContext;
+    private static Object sAppContext;
+    private static String sPackageName = "unknown";
 
     /**
      * 初始化 MCEF / CEF 全局环境。
      *
      * 【PC 原版签名】MCEFBrowser.initialize() — 无参数，默认用系统路径
-     * 【Android 版签名】MCEFBrowser.initialize(Context ctx) — 需要 Application Context
+     * 【Android 版签名】MCEFBrowser.initialize(Object ctx) — 需要 Application Context
      *
      * 调用前必须完成：
      *   1. McefAndroidPaths.ensureDirs(ctx)
      *   2. McefAndroidPaths.exportEnv(ctx)
      *   3. NativeLibraryLoader.loadAll(ctx)
      *
-     * @param ctx Android Application Context
+     * @param ctx Android Application Context（Object 类型，实际为 android.content.Context）
      */
-    public static synchronized void initialize(Context ctx) {
+    public static synchronized void initialize(Object ctx) {
         if (sInitialized) {
-            Log.i(TAG, "MCEF 已初始化，跳过");
+            LOGGER.info("MCEF 已初始化，跳过");
             return;
         }
 
-        sAppContext = ctx.getApplicationContext();
-        Log.i(TAG, "MCEFBrowser.initialize() 开始...");
-        Log.i(TAG, "Context: " + sAppContext.getPackageName());
+        sAppContext = ctx;
+        sPackageName = getPackageName(ctx);
+        LOGGER.info("MCEFBrowser.initialize() 开始...");
+        LOGGER.info("包名: {}", sPackageName);
 
         // ========== Android 特有：路径映射 ==========
         // 真实 MCEF 中，这里会调用 JNI 初始化 CEF，
@@ -69,11 +71,11 @@ public class MCEFBrowser {
         //   settings.single_process = true;    // Android 建议单进程
         //   CefInitialize.initialize(settings);
 
-        Log.i(TAG, "CEF 设置（沙箱路径）:");
-        Log.i(TAG, "  cache_path: " + McefAndroidPaths.getCefCacheDir());
-        Log.i(TAG, "  user_data_path: " + McefAndroidPaths.getCefUserDataDir());
-        Log.i(TAG, "  no_sandbox: true");
-        Log.i(TAG, "  single_process: true");
+        LOGGER.info("CEF 设置（沙箱路径）:");
+        LOGGER.info("  cache_path: {}", McefAndroidPaths.getCefCacheDir());
+        LOGGER.info("  user_data_path: {}", McefAndroidPaths.getCefUserDataDir());
+        LOGGER.info("  no_sandbox: true");
+        LOGGER.info("  single_process: true");
 
         // ========== JNI 初始化 ==========
         // 真实实现中这里会调用 native 方法：
@@ -86,7 +88,7 @@ public class MCEFBrowser {
         //   4. 信号处理：CEF 自定义信号处理可能与 ART 冲突
 
         sInitialized = true;
-        Log.i(TAG, "MCEF 初始化完成（Android 沙箱模式，arm64-v8a，OSR/VirGL）");
+        LOGGER.info("MCEF 初始化完成（Android 沙箱模式，arm64-v8a，OSR/VirGL）");
     }
 
     /**
@@ -103,7 +105,7 @@ public class MCEFBrowser {
             throw new IllegalStateException("MCEFBrowser.initialize() 必须先调用");
         }
 
-        Log.i(TAG, "创建浏览器: " + url + " (" + width + "x" + height + ")");
+        LOGGER.info("创建浏览器: {} ({}x{})", url, width, height);
 
         // 真实实现：调用 nativeCreate(url, width, height)
         // 返回浏览器句柄 ID，后续通过 ID 操作
@@ -115,7 +117,7 @@ public class MCEFBrowser {
      * 关闭指定浏览器。
      */
     public static void close(int browserId) {
-        Log.i(TAG, "关闭浏览器: " + browserId);
+        LOGGER.info("关闭浏览器: {}", browserId);
         // 真实实现：调用 nativeClose(browserId)
     }
 
@@ -135,12 +137,29 @@ public class MCEFBrowser {
     public static synchronized void shutdown() {
         if (!sInitialized) return;
 
-        Log.i(TAG, "MCEF 关闭中...");
+        LOGGER.info("MCEF 关闭中...");
         // 真实实现：调用 nativeShutdown()
         sInitialized = false;
-        Log.i(TAG, "MCEF 已关闭");
+        LOGGER.info("MCEF 已关闭");
     }
 
     public static boolean isInitialized() { return sInitialized; }
-    public static Context getAppContext() { return sAppContext; }
+    public static Object getAppContext() { return sAppContext; }
+
+    /**
+     * 从 Context 获取包名（反射调用，避免依赖 android.*）。
+     */
+    private static String getPackageName(Object ctx) {
+        if (ctx == null) return "unknown";
+        try {
+            java.lang.reflect.Method method = ctx.getClass().getMethod("getPackageName");
+            Object result = method.invoke(ctx);
+            if (result instanceof String) {
+                return (String) result;
+            }
+        } catch (Exception e) {
+            LOGGER.debug("获取包名失败（非 Android 环境）: {}", e.getMessage());
+        }
+        return "unknown";
+    }
 }

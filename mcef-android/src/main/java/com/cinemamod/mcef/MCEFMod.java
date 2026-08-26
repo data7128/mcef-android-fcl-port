@@ -8,8 +8,6 @@ import net.fabricmc.api.ModInitializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import android.content.Context;
-
 /**
  * MCEF Android 版 — Fabric Mod 入口类。
  *
@@ -27,6 +25,11 @@ import android.content.Context;
  *     String android_path = McefAndroidPaths.toSandboxPath(ctx, pc_path);
  *     // → /data/user/0/<pkg>/files/home/user/.config/cef/cache
  *
+ * Context 说明：
+ *   所有 Context 参数使用 Object 类型，避免直接依赖 android.* 类，
+ *   保证 PC 环境 CI 能编译通过。
+ *   实际运行时由 FCL 启动器注入 Android Context 对象。
+ *
  * 许可证：LGPL-2.1-or-later
  */
 public class MCEFMod implements ModInitializer {
@@ -35,22 +38,24 @@ public class MCEFMod implements ModInitializer {
     /**
      * Android Application Context。
      * FCL 环境下由启动器在 mod 加载前注入。
-     * 如果未注入，尝试通过反射从 MinecraftClient 获取。
+     * 如果未注入，尝试通过反射从 ActivityThread 获取。
+     *
+     * 类型说明：实际运行时是 android.content.Context，
+     * 这里声明为 Object 以兼容 PC 编译环境。
      */
-    public static Context APP_CTX;
+    public static Object APP_CTX;
 
     @Override
     public void onInitialize() {
         LOGGER.info("MCEF Mod (Android) 初始化中...");
 
-        Context ctx = getAppContext();
+        Object ctx = getAppContext();
         if (ctx == null) {
-            LOGGER.error("无法获取 Android Context，MCEF 初始化失败");
-            LOGGER.error("FCL 环境下应在启动器侧注入 APP_CTX");
-            return;
+            LOGGER.warn("无法获取 Android Context，使用 PC 降级模式");
+            LOGGER.warn("FCL 环境下应在启动器侧注入 APP_CTX");
+        } else {
+            LOGGER.info("已获取 Application Context");
         }
-
-        LOGGER.info("Context: {} (包名: {})", ctx, ctx.getPackageName());
 
         // ============================================================
         // 集成调用顺序（严格按此顺序，不可调换）
@@ -99,12 +104,12 @@ public class MCEFMod implements ModInitializer {
      *
      * 优先级：
      *   1. 静态字段 APP_CTX（由 FCL 启动器注入）
-     *   2. 反射从 MinecraftClient 获取（PC 版 Fabric 无此字段，Android 版 FCL 可能有）
-     *   3. 反射从 ActivityThread 获取 Application Context
+     *   2. 反射从 ActivityThread 获取 Application Context
+     *   3. 返回 null（PC 降级模式）
      *
      * @return Application Context，获取失败返回 null
      */
-    private static Context getAppContext() {
+    private static Object getAppContext() {
         // 1. 优先用注入的 Context
         if (APP_CTX != null) {
             return APP_CTX;
@@ -119,12 +124,14 @@ public class MCEFMod implements ModInitializer {
             if (activityThread != null) {
                 java.lang.reflect.Method getApp = atCls.getMethod("getApplication");
                 Object app = getApp.invoke(activityThread);
-                if (app instanceof Context) {
-                    APP_CTX = (Context) app;
+                if (app != null) {
+                    APP_CTX = app;
                     LOGGER.info("通过 ActivityThread 获取到 Application Context");
                     return APP_CTX;
                 }
             }
+        } catch (ClassNotFoundException e) {
+            LOGGER.debug("非 Android 环境（找不到 ActivityThread），使用降级模式");
         } catch (Exception e) {
             LOGGER.debug("ActivityThread 方式获取 Context 失败: {}", e.getMessage());
         }
