@@ -1,43 +1,265 @@
 # .github/workflows/build-cef-android.yml
-# ============================================================
-# 此工作流已禁用 — 不在 GitHub Actions 编译完整 CEF/Chromium
-# ============================================================
-#
-# 失败原因（2026-08-25 验证）：
-#   1. 磁盘空间不足：Chromium 源码需要 100GB+，免费 runner 仅 14GB SSD
-#      → 在 gclient sync 阶段报错: OSError: [Errno 28] No space left on device
-#   2. 内存不足：编译需要 32GB+ RAM，免费 runner 仅 16GB
-#      → 编译阶段必定 OOM (Out of Memory)
-#   3. 超时限制：完整编译需 6+ 小时，超过 Actions 6 小时超时
-#   4. GitHub 付费 larger runner (32-core, 64GB) 单次费用约 $40-50
-#      且编译出的 libcef.so 还面临 Activity 依赖、子进程模型等不可绕过的技术死胡同
-#
-# 结论：原生 CEF 移植在普通手机 FCL 上几乎不可实现。
-# 完整分析见 docs/CEF-PORT-FEASIBILITY.md
-#
-# 如需自行编译 CEF，请使用自建大内存 Linux 服务器（64GB RAM, 200GB SSD）。
-#
-# 此文件保留为参考，不执行任何 job。
-# 要重新启用：取消下方 job 的注释并移除 `if: false`
-name: Build CEF Android (DISABLED)
+# FCL/Pojav Android arm64-v8a CEF 构建
+# 适配: FCL 安卓沙箱 + VirGL 离屏渲染,关闭沙箱/zygote
+name: Build CEF Android (arm64-v8a, FCL)
 
 on:
   workflow_dispatch:
-    inputs:
-      reason:
-        description: '确认：此构建在免费 runner 上必定失败'
-        required: true
-        default: '我已阅读文档，知道会失败'
+  push:
+    branches: [feature/dev-cef-android]
+    paths:
+      - '.github/workflows/build-cef-android.yml'
+      - 'mcef-android/**'
+      - 'fcl-patches/**'
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  GN_ARGS_COMMON: >-
+    is_official_build=true
+    is_debug=false
+    target_cpu="arm64"
+    target_os="android"
+    chrome_pgo_phase=0
+    treat_warnings_as_errors=false
+    symbol_level=1
+    use_thin_lto=false
+    use_remoteexec=false
+    blink_symbol_level=0
+    v8_symbol_level=0
 
 jobs:
   build-cef:
-    if: false  # 永远不执行
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     steps:
-      - name: 此 Job 已禁用
+      - name: Free disk before build
         run: |
-          echo "此工作流已禁用。"
-          echo "原因：GitHub 免费 runner 无法编译 Chromium（磁盘/内存/超时限制）"
-          echo "如需编译 CEF，请使用自建大内存 Linux 服务器（64GB RAM, 200GB SSD）"
-          echo "完整分析见 docs/CEF-PORT-FEASIBILITY.md"
-          exit 1
+          echo "=== 初始磁盘 ==="
+          df -h
+          sudo apt-get clean
+          sudo rm -rf /opt/* /usr/local/lib/android /usr/share/dotnet /usr/share/swift
+          sudo rm -rf /usr/local/.ghcup /home/runner/.dotnet /home/runner/.nuget
+          sudo rm -rf /home/runner/.gradle /home/runner/.cargo /home/runner/.rustup
+          sudo rm -rf /home/runner/work/_temp
+          sudo docker system prune -af || true
+          sudo rm -rf /var/lib/docker
+          sudo apt-get autoremove -y
+          sudo apt-get autoclean
+          df -h
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl wget unzip xz-utils python3 python3-pip \
+            openjdk-17-jdk-headless lsb-release \
+            libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 \
+            libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 \
+            libasound2 libxshmfence1 ninja-build clang lld
+          pip3 install --break-system-packages --quiet packaging
+
+      - name: Create swap (8G) to avoid OOM
+        run: |
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
+      - name: Install depot_tools
+        run: |
+          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          echo "$PWD/depot_tools" >> $GITHUB_PATH
+          export PATH="$PWD/depot_tools:$PATH"
+
+      - name: Fetch CEF source
+        env:
+          PATH: $PWD/depot_tools:$PATH
+          DEPOT_TOOLS_UPDATE: 0
+          CEF_BRANCH: 6533
+        run: |
+          mkdir cef && cd cef
+          echo "CEF_BRANCH=${CEF_BRANCH}" > cef_branch.txt
+          cat > .gclient <<'EOF'
+          solutions = [
+            { "name" : "chromium",
+              "url" : "https://chromium.googlesource.com/chromium/src.git",
+              "managed" : False,
+              "custom_deps" : {},
+              "deps_file" : "DEPS",
+              "safesync_url" : "",
+            },
+          ]
+          EOF
+          cd ..
+          python3 cef/automate-git.py \
+            --branch=${CEF_BRANCH} \
+            --checkout=force \
+            --no-depot-tools-update \
+            --force-distrib \
+            --x64-build \
+            --with-pgo-profiles \
+            --minimal-distrib \
+            --client-distrib
+
+      - name: Cleanup redundant components (chromium src)
+        run: |
+          cd cef/chromium
+          rm -rf third_party/angle/third_party/vulkan-validation-layers
+          rm -rf third_party/blink/perf_tests
+          rm -rf third_party/catapult
+          rm -rf third_party/chromecast
+          rm -rf third_party/cld_3
+          rm -rf third_party/crc32c
+          rm -rf third_party/crashpad/crashpad/handler
+          rm -rf third_party/cronet
+          rm -rf third_party/devtools-frontend
+          rm -rf third_party/ffmpeg
+          rm -rf third_party/grpc
+          rm -rf third_party/harfbuzz-ng/test
+          rm -rf third_party/icu/icu4c/source/test
+          rm -rf third_party/jsr-305
+          rm -rf third_party/libaom/source/test
+          rm -rf third_party/libdrm
+          rm -rf third_party/libjpeg_turbo
+          rm -rf third_party/libpng
+          rm -rf third_party/libsrtp
+          rm -rf third_party/libsync
+          rm -rf third_party/libvpx
+          rm -rf third_party/libwebp
+          rm -rf third_party/libxml
+          rm -rf third_party/libyuv
+          rm -rf third_party/material_color_utilities
+          rm -rf third_party/mesa
+          rm -rf third_party/opus
+          rm -rf third_party/pdfium
+          rm -rf third_party/perfetto
+          rm -rf third_party/polymer
+          rm -rf third_party/protobuf
+          rm -rf third_party/skia/bench
+          rm -rf third_party/skia/tools
+          rm -rf third_party/sqlite
+          rm -rf third_party/swiftshader
+          rm -rf third_party/test_fonts
+          rm -rf third_party/unrar
+          rm -rf third_party/usrsctp
+          rm -rf third_party/vulkan-deps
+          rm -rf third_party/vulkan_memory_allocator
+          rm -rf third_party/webdriver
+          rm -rf third_party/webrtc
+          rm -rf third_party/webgl-conformance-tests
+          rm -rf third_party/widevine
+          rm -rf components/cronet
+          rm -rf components/enterprise
+          rm -rf components/reporting
+          rm -rf content/test
+          rm -rf extensions
+          rm -rf gpu/command_buffer/tests
+          rm -rf media/test/data
+          rm -rf net/tools/testserver
+          rm -rf tools/perf
+          rm -rf .git/objects/pack/*.idx 2>/dev/null || true
+          find . -name "*.pdb" -delete
+          find . -name "*.lib" -delete
+          find . -name "*.dll" -delete
+          find . -name "*.exe" -delete
+          find . -name "*.exp" -delete
+          find . -name "*.idb" -delete
+          find . -name "*.iobj" -delete
+          find . -name "*.ipdb" -delete
+          df -h
+
+      - name: Generate ninja files (FCL: no-sandbox, no-zygote, OSR, VirGL)
+        working-directory: cef
+        env:
+          PATH: $PWD/../depot_tools:$PATH
+          DEPOT_TOOLS_UPDATE: 0
+          CEF_BRANCH: 6533
+          GN_DEFINES: >-
+            ${{ env.GN_ARGS_COMMON }}
+            is_component_build=false
+            use_allocator="none"
+            enable_nacl=false
+            proprietary_codecs=true
+            ffmpeg_branding="Chrome"
+            chrome_pgo_phase=0
+            cef_standalone=true
+            cef_pgo_profiling=false
+            use_zygote_handle=false
+            use_chromium_zygote=false
+            is_cronet_build=false
+            toolkit_views=false
+            use_ozone=true
+            ozone_platform="egl"
+            ozone_platform_headless=true
+            headless_mode=true
+            use_glib=false
+            use_gconf=false
+            use_libdrm=false
+            use_vaapi=false
+            use_x11=false
+            use_gtk=false
+            disable_zygote=true
+            disable_sandbox=true
+            sandbox_bpf_path=""
+            seccomp_bpf_filters=""
+            custom_pkg_name="org.cef.mcef"
+            host_cpu="x64"
+        run: |
+          echo "=== 编译磁盘状态 ==="
+          df -h
+          echo "=== 内存状态 ==="
+          free -h
+          cd chromium
+          export GN_DEFINES="$GN_DEFINES"
+          tools/gn/bootstrap/bootstrap.py --skip-generate-buildfiles
+          src/cef/cef_create_projects.sh
+          cd out
+          ../buildtools/linux64/gn gen Release_GN_arm64 \
+            --args='use_java=true target_cpu="arm64" target_os="android" is_official_build=true is_debug=false is_component_build=false chrome_pgo_phase=0 symbol_level=1 blink_symbol_level=0 v8_symbol_level=0 use_thin_lto=false proprietary_codecs=true ffmpeg_branding="Chrome" cef_standalone=true cef_pgo_profiling=false use_zygote_handle=false use_chromium_zygote=false disable_zygote=true disable_sandbox=true use_allocator="none" enable_nacl=false is_cronet_build=false toolkit_views=false use_ozone=true ozone_platform="egl" ozone_platform_headless=true headless_mode=true use_glib=false use_gconf=false use_libdrm=false use_vaapi=false use_x11=false use_gtk=false custom_pkg_name="org.cef.mcef"'
+
+      - name: Build libcef.so
+        working-directory: cef/chromium/src/out/Release_GN_arm64
+        env:
+          PATH: $PWD/../../../../depot_tools:$PWD/../../../../depot_tools/python:$PATH
+        run: |
+          echo "=== 编译前磁盘 ==="
+          df -h
+          echo "=== 编译前内存 ==="
+          free -h
+          ninja -j4 -l4 cef
+          echo "=== 编译后 ==="
+          df -h
+          free -h
+
+      - name: Build libjcef.so
+        working-directory: cef/chromium/src/out/Release_GN_arm64
+        env:
+          PATH: $PWD/../../../../depot_tools:$PWD/../../../../depot_tools/python:$PATH
+        run: |
+          ninja -j4 -l4 jcef
+
+      - name: Strip & pack artifacts
+        run: |
+          ART=cef-artifacts/arm64-v8a
+          mkdir -p $ART
+          SRC=cef/chromium/src/out/Release_GN_arm64
+          for f in libcef.so libjcef.so libEGL.so libGLESv2.so libvk_swiftshader.so libvulkan.so.1; do
+            [ -f $SRC/$f ] && $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip --strip-unneeded $SRC/$f -o $ART/$f || true
+          done
+          for f in icudtl.dat natives_blob.bin snapshot_blob.bin v8_context_snapshot.bin chrome_100_percent.pak chrome_200_percent.pak resources.pak cef.pak cef_100_percent.pak cef_200_percent.pak cef_extensions.pak devtools_resources.pak; do
+            [ -f $SRC/$f ] && cp $SRC/$f $ART/
+          done
+          ls -lah $ART
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cef-android-arm64
+          path: cef-artifacts/arm64-v8a/*
+          if-no-files-found: error
+          retention-days: 14
