@@ -1,0 +1,57 @@
+// mcef-android/build.gradle
+// MCEF Android 移植版 — Fabric Mod
+// 包含 Android 沙箱适配、原生库加载、路径映射等基础设施
+//
+// 注意：此模块依赖 Android SDK，需要在 Android 环境下编译。
+// PC 环境下编译会因缺少 android.* 类而失败。
+
+plugins {
+    id 'fabric-loom' version '1.7.1'
+    id 'maven-publish'
+}
+
+version = "0.1.0-android-alpha"
+group = "com.cinemamod.mcef"
+
+base {
+    archivesName = "mcef-android"
+}
+
+repositories {
+    maven { url = "https://maven.fabricmc.net" }
+    mavenCentral()
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:1.20.1"
+    mappings "net.fabricmc:yarn:1.20.1+build.10:v2"
+    modImplementation "net.fabricmc:fabric-loader:0.15.11"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:0.92.2+1.20.1"
+
+    // Android SDK 依赖（编译时需要，运行时由系统提供）
+    // 实际 Android 编译环境中使用 android.jar
+    // compileOnly files("libs/android.jar")
+}
+
+processResources {
+    inputs.property "version", project.version
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 17
+}
+
+java {
+    withSourcesJar()
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+jar {
+    from("LICENSE") {
+        rename { "${it}_${base.archivesName.get()}" }
+    }
+}

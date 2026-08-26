@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "mcef-android",
+  "version": "${version}",
+  "name": "MCEF Android",
+  "description": "MCEF (Minecraft Chromium Embedded Framework) Android 移植版 — FCL 沙箱适配、原生库加载、路径映射基础设施。\n注意：这是移植框架，不含 libcef.so 二进制。完整浏览器功能需自备 arm64-v8a 版 libcef.so。",
+  "authors": [
+    "CinemaMod Team"
+  ],
+  "contact": {
+    "repo": "https://github.com/data7128/mcef-android-fcl-port"
+  },
+  "license": "LGPL-2.1-or-later",
+  "icon": "assets/mcef/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.cinemamod.mcef.MCEFMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "fabric": "*",
+    "minecraft": "1.20.1"
+  },
+  "custom": {
+    "mcef:platform": "android-arm64-v8a",
+    "mcef:sandbox": "fcl-data-user-0",
+    "mcef:renderer": "osr-gl4es"
+  }
+}
